@@ -29,15 +29,16 @@ struct injector_t {
     uint64_t(*ReadMemory64)(uintptr_t addr);
     float (*ReadMemoryFloat)(uintptr_t addr);
     double (*ReadMemoryDouble)(uintptr_t addr);
-    void (*MakeJMP)(uintptr_t at, uintptr_t dest);
-    void (*MakeJMPwNOP)(uintptr_t at, uintptr_t dest);
-    void (*MakeJAL)(uintptr_t at, uintptr_t dest);
-    void (*MakeCALL)(uintptr_t at, uintptr_t dest);
+    uintptr_t (*GetBranchDestination)(uintptr_t at);
+    uintptr_t (*MakeJMP)(uintptr_t at, uintptr_t dest);
+    uintptr_t (*MakeJMPwNOP)(uintptr_t at, uintptr_t dest);
+    uintptr_t (*MakeJAL)(uintptr_t at, uintptr_t dest);
     void (*MakeNOP)(uintptr_t at);
     void (*MakeNOPWithSize)(uintptr_t at, size_t count);
     void (*MakeRangedNOP)(uintptr_t at, uintptr_t until);
     uintptr_t(*MakeInline)(size_t instrCount, uintptr_t at, ...);
     void (*MakeInlineLUIORI)(uintptr_t at, float imm);
+    void (*MakeLUIORI)(uintptr_t at, RegisterID reg, float imm);
     void (*MakeInlineLI)(uintptr_t at, int32_t imm);
 };
 
@@ -78,6 +79,6 @@ extern struct injector_t injector;
          9,8,7,6,5,4,3,2,1,0
 #endif
 
-#define MakeInlineWrapper(at, ...) MakeInline(PP_NARG(__VA_ARGS__), at, __VA_ARGS__)
-#define MakeInlineWrapperWithNOP(at, ...) MakeNOP(at + 4); MakeInline(PP_NARG(__VA_ARGS__), at, __VA_ARGS__)
+#define MakeInlineWrapper(at, ...) injector.MakeInline(PP_NARG(__VA_ARGS__), at, __VA_ARGS__)
+#define MakeInlineWrapperWithNOP(at, ...) injector.MakeNOP(at + 4); injector.MakeInline(PP_NARG(__VA_ARGS__), at, __VA_ARGS__)
 #endif

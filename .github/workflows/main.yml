@@ -1,27 +1,38 @@
 name: GitHub Actions Build
 
 on:
-  pull_request:
   push:
+    paths-ignore:
+      - "**/*.md"
+      - '**/*.txt'
     branches:
       - '**'
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - '**/*.txt'
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
   build:
-    runs-on: windows-2022
-    strategy:
-      matrix:
-        platform: [Win32]
-        buildtype: [Release]
+    runs-on: windows-latest
 
     steps:
     - name: Checkout Repo
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
     - name: Build Solution
       uses: ./.github/workflows/build_all
     - name: Update Tags
       continue-on-error: true
       if: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
-      uses: ThirteenAG/update-tags@v1
+      uses: ThirteenAG/update-tags@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

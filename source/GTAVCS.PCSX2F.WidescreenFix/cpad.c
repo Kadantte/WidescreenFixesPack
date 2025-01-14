@@ -41,8 +41,8 @@ void ReplacePadFuncsWithModernControls()
     injector.WriteMemory16(0x285C9C, offsetof(struct CPad, NewState.LEFTSHOULDER1));
     injector.WriteMemory16(0x285CBC, offsetof(struct CPad, OldState.LEFTSHOULDER1));
     injector.WriteMemory16(0x285CCC, offsetof(struct CPad, NewState.RIGHTSHOULDER1));
-    injector.WriteMemory16(0x285CC4, offsetof(struct CPad, NewState.RIGHTSHOULDER2));
-    injector.WriteMemory16(0x285CD8, offsetof(struct CPad, OldState.RIGHTSHOULDER2));
+    injector.WriteMemory16(0x285CC4, offsetof(struct CPad, NewState.RIGHTSHOULDER1));
+    injector.WriteMemory16(0x285CD8, offsetof(struct CPad, OldState.RIGHTSHOULDER1));
 
     //CPad__GetLookBehindForCar - add possibility to look back with R3
     injector.MakeJAL(0x29486C, (intptr_t)CPad__GetLookBehindForCar);
@@ -120,6 +120,7 @@ int16_t CPad__ChangeStationUpJustDown(struct CPad* pad)
         return 0;
     if (pad->NewState.DPADRIGHT)
         return pad->OldState.DPADRIGHT == 0;
+    return 0;
 }
 int16_t CPad__ChangeStationDownJustDown(struct CPad* pad)
 {
@@ -127,6 +128,7 @@ int16_t CPad__ChangeStationDownJustDown(struct CPad* pad)
         return 0;
     if (pad->NewState.DPADLEFT)
         return pad->OldState.DPADLEFT == 0;
+    return 0;
 }
 int16_t CPad__CycleWeaponLeftJustDown(struct CPad* pad)
 {

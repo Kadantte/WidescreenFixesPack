@@ -3,101 +3,45 @@
 #include <D3dx9.h>
 #pragma comment(lib, "D3dx9.lib")
 
-namespace AffinityChanges
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib") // needed for timeBeginPeriod()/timeEndPeriod()
+#include <LEDEffects.h>
+
+uint32_t curAmmoInClip = 1;
+uint32_t curClipCapacity = 1;
+void AmmoInClip()
 {
-    DWORD_PTR gameThreadAffinity = 0;
-    static bool Init()
+    static std::vector<LogiLed::KeyName> keys = {
+        LogiLed::KeyName::F1, LogiLed::KeyName::F2, LogiLed::KeyName::F3,
+        LogiLed::KeyName::F4, LogiLed::KeyName::F5, LogiLed::KeyName::F6,
+        LogiLed::KeyName::F7, LogiLed::KeyName::F8, LogiLed::KeyName::F9,
+        LogiLed::KeyName::F10, LogiLed::KeyName::F11, LogiLed::KeyName::F12,
+        LogiLed::KeyName::PRINT_SCREEN, LogiLed::KeyName::SCROLL_LOCK,
+        LogiLed::KeyName::PAUSE_BREAK,
+    };
+
+    static auto oldAmmoInClip = -1;
+    if (curAmmoInClip != oldAmmoInClip)
     {
-        DWORD_PTR processAffinity, systemAffinity;
-        if (!GetProcessAffinityMask(GetCurrentProcess(), &processAffinity, &systemAffinity))
+        auto maxAmmo = curClipCapacity;
+        float ammoInClipPercent = ((float)curAmmoInClip / (float)maxAmmo) * 100.0f;
+
+        for (size_t i = 0; i < keys.size(); i++)
         {
-            return false;
+            auto indexInPercent = ((float)i / (float)keys.size()) * 100.0f;
+            if (ammoInClipPercent > indexInPercent)
+                LogiLedSetLightingForKeyWithKeyName(keys[i], 100, 100, 100);
+            else
+                LogiLedSetLightingForKeyWithKeyName(keys[i], 10, 10, 10);
         }
-
-        DWORD_PTR otherCoresAff = (processAffinity - 1) & processAffinity;
-        if (otherCoresAff == 0) // Only one core is available for the game
-        {
-            return false;
-        }
-        gameThreadAffinity = processAffinity & ~otherCoresAff;
-
-        SetThreadAffinityMask(GetCurrentThread(), gameThreadAffinity);
-
-        return true;
     }
-
-    static HANDLE WINAPI CreateThread_GameThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress,
-        PVOID lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId)
-    {
-        HANDLE hThread = CreateThread(lpThreadAttributes, dwStackSize, lpStartAddress, lpParameter, dwCreationFlags | CREATE_SUSPENDED, lpThreadId);
-        if (hThread != nullptr)
-        {
-            SetThreadAffinityMask(hThread, gameThreadAffinity);
-            if ((dwCreationFlags & CREATE_SUSPENDED) == 0) // Resume only if the game didn't pass CREATE_SUSPENDED
-            {
-                ResumeThread(hThread);
-            }
-        }
-        return hThread;
-    }
-
-    static void ReplaceFunction(void** funcPtr)
-    {
-        DWORD dwProtect;
-
-        VirtualProtect(funcPtr, sizeof(*funcPtr), PAGE_READWRITE, &dwProtect);
-        *funcPtr = &CreateThread_GameThread;
-        VirtualProtect(funcPtr, sizeof(*funcPtr), dwProtect, &dwProtect);
-    }
-
-    static bool RedirectImports(HMODULE module_handle)
-    {
-        const DWORD_PTR instance = reinterpret_cast<DWORD_PTR>(module_handle);
-        const PIMAGE_NT_HEADERS ntHeader = reinterpret_cast<PIMAGE_NT_HEADERS>(instance + reinterpret_cast<PIMAGE_DOS_HEADER>(instance)->e_lfanew);
-
-        // Find IAT
-        PIMAGE_IMPORT_DESCRIPTOR pImports = reinterpret_cast<PIMAGE_IMPORT_DESCRIPTOR>(instance + ntHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-
-        for (; pImports->Name != 0; pImports++)
-        {
-            if (_stricmp(reinterpret_cast<const char*>(instance + pImports->Name), "kernel32.dll") == 0)
-            {
-                if (pImports->OriginalFirstThunk != 0)
-                {
-                    const PIMAGE_THUNK_DATA pThunk = reinterpret_cast<PIMAGE_THUNK_DATA>(instance + pImports->OriginalFirstThunk);
-
-                    for (ptrdiff_t j = 0; pThunk[j].u1.AddressOfData != 0; j++)
-                    {
-                        if (strcmp(reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(instance + pThunk[j].u1.AddressOfData)->Name, "CreateThread") == 0)
-                        {
-                            void** pAddress = reinterpret_cast<void**>(instance + pImports->FirstThunk) + j;
-                            ReplaceFunction(pAddress);
-                            return true;
-                        }
-                    }
-                }
-                else
-                {
-                    void** pFunctions = reinterpret_cast<void**>(instance + pImports->FirstThunk);
-
-                    for (ptrdiff_t j = 0; pFunctions[j] != nullptr; j++)
-                    {
-                        if (pFunctions[j] == &CreateThread)
-                        {
-                            ReplaceFunction(&pFunctions[j]);
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
-    }
+    oldAmmoInClip = curAmmoInClip;
 }
 
 float gVisibility = 1.0f;
 int32_t gBlacklistIndicators = 0;
 uint32_t gColor;
+uint32_t bLightSyncRGB;
 float* __cdecl FGetHSV(float* dest, uint8_t H, uint8_t S, uint8_t V)
 {
     auto bChangeColor = ((H == 0x41 && S == 0x33) || (H == 0x5B && S == 0 && V == 0xFF) || (H == 0x2B && S == 0x40 && V == 0xFF)); //goggles || green ind || yellow ind
@@ -217,12 +161,6 @@ struct Screen
     std::filesystem::path szLoadscPath;
 } Screen;
 
-void InitLL()
-{
-    auto pattern = hook::pattern("74 ? 68 ? ? ? ? 53 FF D7");
-    injector::MakeNOP(pattern.get_first(), 2, true);
-}
-
 void Init()
 {
     CIniReader iniReader("");
@@ -234,6 +172,7 @@ void Init()
     Screen.szLoadscPath.replace_extension(".png");
     gBlacklistIndicators = iniReader.ReadInteger("BONUS", "BlacklistIndicators", 0);
     gColor = iniReader.ReadInteger("BONUS", "GogglesLightColor", 0);
+    bLightSyncRGB = iniReader.ReadInteger("BONUS", "LightSyncRGB", 1);
 
     if (!Screen.Width || !Screen.Height)
         std::tie(Screen.Width, Screen.Height) = GetDesktopRes();
@@ -254,13 +193,39 @@ void Init()
     iniWriter.WriteString("WinDrv.WindowsClient", "FullscreenViewportY", ResY);
 
     if (bForceLL)
-        CallbackHandler::RegisterCallback(InitLL, hook::pattern("74 ? 68 ? ? ? ? 53 FF D7").count_hint(1).empty(), 0x1100);
+    {
+        auto pattern = hook::pattern("74 ? 68 ? ? ? ? 53 FF D7");
+        injector::MakeNOP(pattern.get_first(), 2, true);
+    }
 
     if (nFPSLimit)
     {
         static float fFPSLimit = 1.0f / static_cast<float>(nFPSLimit);
         auto pattern = hook::pattern("A1 ? ? ? ? 8B 0D ? ? ? ? 89 45 DC 89 4D C4");
         injector::WriteMemory(pattern.get_first(1), &fFPSLimit, true);
+    }
+
+    if (bLightSyncRGB)
+    {
+        LEDEffects::Inject([]()
+        {
+            static auto fPlayerVisibility = gVisibility;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            auto gVisCmp = static_cast<float>(static_cast<int>(gVisibility * 10.0f)) / 10.0f;
+            auto fPlVisCmp = static_cast<float>(static_cast<int>(fPlayerVisibility * 10.0f)) / 10.0f;
+
+            if (fPlVisCmp > gVisCmp)
+                fPlayerVisibility -= 0.05f;
+            else if (fPlVisCmp < gVisCmp)
+                fPlayerVisibility += 0.05f;
+
+            fPlayerVisibility = std::clamp(fPlayerVisibility, 0.0f, 1.0f);
+
+            auto [R, G, B] = LEDEffects::RGBtoPercent(1, 255, 1, fPlayerVisibility);
+
+            LEDEffects::SetLighting(R, G, B, false, false, true);
+            AmmoInClip();
+        });
     }
 
     //for test only (steam version)
@@ -623,9 +588,7 @@ void InitD3DDrv()
                     *(uint32_t*)(regs.ebx + 0x3C) = regs.edi;
                 }
             }
-            static float _xmm0 = 0.0f;
-            _asm movss   dword ptr[_xmm0], xmm0
-            *(float*)(regs.esp + 0x18) = _xmm0;
+            *(float*)(regs.esp + 0x18) = regs.xmm0.f32[0];
         }
     }; injector::MakeInline<RenderFilmstrip_Hook3>(pattern.get_first(4), pattern.get_first(10));
 
@@ -779,14 +742,8 @@ void InitEngine()
     {
         void operator()(injector::reg_pack& regs)
         {
-            static const float f1_0 = 1.0f;
-            _asm
-            {
-                movss xmm0, Screen.fHudOffset
-                subss xmm3, xmm0
-                addss xmm3, xmm4
-                movss xmm0, f1_0
-            }
+            regs.xmm3.f32[0] -= Screen.fHudOffset;
+            regs.xmm3.f32[0] += regs.xmm4.f32[0];
         }
     }; injector::MakeInline<HUDPosHook>(pattern.get_first(0), pattern.get_first(8));
 
@@ -795,13 +752,7 @@ void InitEngine()
     {
         void operator()(injector::reg_pack& regs)
         {
-            auto regs_ecx = regs.ecx;
-            _asm
-            {
-                cvtsi2ss xmm2, regs_ecx
-                movss xmm2, Screen.fTextScaleX
-                divss xmm1, xmm2
-            }
+            regs.xmm1.f32[0] /= Screen.fTextScaleX;
         }
     }; injector::MakeInline<TextHook>(pattern.get_first(-4), pattern.get_first(4));
 
@@ -813,13 +764,10 @@ void InitEngine()
     {
         void operator()(injector::reg_pack& regs)
         {
-            auto f3 = 0.0f;
+            auto f3 = regs.xmm3.f32[0];
             auto f4 = *(float*)(regs.esp + 0x24);
-            auto f5 = 0.0f;
-            auto f6 = 0.0f;
-            _asm { movss dword ptr ds : f3, xmm3}
-            _asm { movss dword ptr ds : f5, xmm5}
-            _asm { movss dword ptr ds : f6, xmm6}
+            auto f5 = regs.xmm5.f32[0];
+            auto f6 = regs.xmm6.f32[0];
 
             if (!*GIsWideScreen && *GIsSameFrontBufferOnNormalTV)
             {
@@ -893,8 +841,12 @@ void InitEngine()
 
     if (bSingleCoreAffinity)
     {
-        AffinityChanges::Init();
-        AffinityChanges::RedirectImports(GetModuleHandle(L"Engine"));
+        if (AffinityChanges::Init())
+        {
+            IATHook::Replace(GetModuleHandle(L"Engine"), "kernel32.dll",
+                std::forward_as_tuple("CreateThread", AffinityChanges::CreateThread_GameThread)
+            );
+        }
     }
 }
 
@@ -977,7 +929,7 @@ void InitEchelon()
     CIniReader iniReader("");
     gBlacklistIndicators = iniReader.ReadInteger("BONUS", "BlacklistIndicators", 0);
     
-    if (gBlacklistIndicators)
+    if (gBlacklistIndicators || bLightSyncRGB)
     {
         auto pattern = hook::module_pattern(GetModuleHandle(L"Echelon"), "8B 96 ? ? ? ? 8D 0C 80");
         struct BlacklistIndicatorsHook
@@ -1000,20 +952,294 @@ void InitEchelon()
                 }
             }
         }; injector::MakeInline<BlacklistIndicatorsHook>(pattern.get_first(0), pattern.get_first(6));
+
+        
+        pattern = hook::module_pattern(GetModuleHandle(L"Echelon"), "8B 81 ? ? ? ? 8B 54 24 04 89 02 8B 81 ? ? ? ? 8B 4C 24 08 89 01");
+        struct GetPrimaryAmmoHook
+        {
+            void operator()(injector::reg_pack& regs)
+            {
+                curAmmoInClip = *(uint32_t*)(regs.ecx + 0x0B6C);
+                curClipCapacity = *(uint32_t*)(regs.ecx + 0x0B6C + 4);
+                regs.eax = curAmmoInClip;
+            }
+        }; injector::MakeInline<GetPrimaryAmmoHook>(pattern.get_first(0), pattern.get_first(6));
     }
+}
+
+float fFPSLimit;
+int32_t nFrameLimitType;
+class FrameLimiter
+{
+public:
+    enum FPSLimitMode { FPS_NONE, FPS_REALTIME, FPS_ACCURATE };
+    FPSLimitMode mFPSLimitMode = FPS_NONE;
+private:
+    double TIME_Frequency = 0.0;
+    double TIME_Ticks = 0.0;
+    double TIME_Frametime = 0.0;
+    float  fFPSLimit = 0.0f;
+    bool   bFpsLimitWasUpdated = false;
+public:
+    void Init(FPSLimitMode mode, float fps_limit)
+    {
+        bFpsLimitWasUpdated = true;
+        mFPSLimitMode = mode;
+        fFPSLimit = fps_limit;
+
+        LARGE_INTEGER frequency;
+        QueryPerformanceFrequency(&frequency);
+        static constexpr auto TICKS_PER_FRAME = 1;
+        auto TICKS_PER_SECOND = (TICKS_PER_FRAME * fFPSLimit);
+        if (mFPSLimitMode == FPS_ACCURATE)
+        {
+            TIME_Frametime = 1000.0 / (double)fFPSLimit;
+            TIME_Frequency = (double)frequency.QuadPart / 1000.0; // ticks are milliseconds
+        }
+        else // FPS_REALTIME
+        {
+            TIME_Frequency = (double)frequency.QuadPart / (double)TICKS_PER_SECOND; // ticks are 1/n frames (n = fFPSLimit)
+        }
+        Ticks();
+    }
+    DWORD Sync_RT()
+    {
+        if (bFpsLimitWasUpdated)
+        {
+            bFpsLimitWasUpdated = false;
+            return 1;
+        }
+
+        DWORD lastTicks, currentTicks;
+        LARGE_INTEGER counter;
+
+        QueryPerformanceCounter(&counter);
+        lastTicks = (DWORD)TIME_Ticks;
+        TIME_Ticks = (double)counter.QuadPart / TIME_Frequency;
+        currentTicks = (DWORD)TIME_Ticks;
+
+        return (currentTicks > lastTicks) ? currentTicks - lastTicks : 0;
+    }
+    DWORD Sync_SLP()
+    {
+        if (bFpsLimitWasUpdated)
+        {
+            bFpsLimitWasUpdated = false;
+            return 1;
+        }
+
+        LARGE_INTEGER counter;
+        QueryPerformanceCounter(&counter);
+        double millis_current = (double)counter.QuadPart / TIME_Frequency;
+        double millis_delta = millis_current - TIME_Ticks;
+        if (TIME_Frametime <= millis_delta)
+        {
+            TIME_Ticks = millis_current;
+            return 1;
+        }
+        else if (TIME_Frametime - millis_delta > 2.0) // > 2ms
+            Sleep(1); // Sleep for ~1ms
+        else
+            Sleep(0); // yield thread's time-slice (does not actually sleep)
+
+        return 0;
+    }
+    void Sync()
+    {
+        if (mFPSLimitMode == FPS_REALTIME)
+            while (!Sync_RT());
+        else if (mFPSLimitMode == FPS_ACCURATE)
+            while (!Sync_SLP());
+    }
+private:
+    void Ticks()
+    {
+        LARGE_INTEGER counter;
+        QueryPerformanceCounter(&counter);
+        TIME_Ticks = (double)counter.QuadPart / TIME_Frequency;
+    }
+};
+
+int nFullScreenRefreshRateInHz;
+void ForceFullScreenRefreshRateInHz(D3DPRESENT_PARAMETERS* pPresentationParameters)
+{
+    if (!pPresentationParameters->Windowed)
+    {
+        std::vector<int> list;
+        DISPLAY_DEVICE dd;
+        dd.cb = sizeof(DISPLAY_DEVICE);
+        DWORD deviceNum = 0;
+        while (EnumDisplayDevices(NULL, deviceNum, &dd, 0))
+        {
+            DISPLAY_DEVICE newdd = { 0 };
+            newdd.cb = sizeof(DISPLAY_DEVICE);
+            DWORD monitorNum = 0;
+            DEVMODE dm = { 0 };
+            while (EnumDisplayDevices(dd.DeviceName, monitorNum, &newdd, 0))
+            {
+                for (auto iModeNum = 0; EnumDisplaySettings(NULL, iModeNum, &dm) != 0; iModeNum++)
+                    list.emplace_back(dm.dmDisplayFrequency);
+                monitorNum++;
+            }
+            deviceNum++;
+        }
+
+        std::sort(list.begin(), list.end());
+        if (nFullScreenRefreshRateInHz > list.back() || nFullScreenRefreshRateInHz < list.front() || nFullScreenRefreshRateInHz < 0)
+            pPresentationParameters->FullScreen_RefreshRateInHz = list.back();
+        else
+            pPresentationParameters->FullScreen_RefreshRateInHz = nFullScreenRefreshRateInHz;
+    }
+}
+
+HWND g_hFocusWindow = NULL;
+bool bForceWindowedMode;
+bool bUsePrimaryMonitor;
+bool bCenterWindow;
+bool bAlwaysOnTop;
+bool bDoNotNotifyOnTaskSwitch;
+int nForceWindowStyle;
+
+void ForceWindowed(D3DPRESENT_PARAMETERS* pPresentationParameters, D3DDISPLAYMODEEX* pFullscreenDisplayMode = NULL)
+{
+    HWND hwnd = pPresentationParameters->hDeviceWindow ? pPresentationParameters->hDeviceWindow : g_hFocusWindow;
+    HMONITOR monitor = MonitorFromWindow((!bUsePrimaryMonitor && hwnd) ? hwnd : GetDesktopWindow(), MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info;
+    info.cbSize = sizeof(MONITORINFO);
+    GetMonitorInfo(monitor, &info);
+    int DesktopResX = info.rcMonitor.right - info.rcMonitor.left;
+    int DesktopResY = info.rcMonitor.bottom - info.rcMonitor.top;
+
+    int left = (int)info.rcMonitor.left;
+    int top = (int)info.rcMonitor.top;
+
+    if (nForceWindowStyle != 1) // not borderless fullscreen
+    {
+        left += (int)(((float)DesktopResX / 2.0f) - ((float)pPresentationParameters->BackBufferWidth / 2.0f));
+        top += (int)(((float)DesktopResY / 2.0f) - ((float)pPresentationParameters->BackBufferHeight / 2.0f));
+    }
+
+    pPresentationParameters->Windowed = 1;
+
+    // This must be set to default (0) on windowed mode as per D3D9 spec
+    pPresentationParameters->FullScreen_RefreshRateInHz = D3DPRESENT_RATE_DEFAULT;
+
+    // If exists, this must match the rate in PresentationParameters
+    if (pFullscreenDisplayMode != NULL)
+        pFullscreenDisplayMode->RefreshRate = D3DPRESENT_RATE_DEFAULT;
+
+    // This flag is not available on windowed mode as per D3D9 spec
+    pPresentationParameters->PresentationInterval &= ~D3DPRESENT_DONOTFLIP;
+
+    if (hwnd != NULL)
+    {
+        int cx, cy;
+        UINT uFlags = SWP_SHOWWINDOW;
+        LONG lOldStyle = GetWindowLong(hwnd, GWL_STYLE);
+        LONG lOldExStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+        LONG lNewStyle, lNewExStyle;
+        if (nForceWindowStyle == 1) // borderless fullscreen
+        {
+            cx = DesktopResX;
+            cy = DesktopResY;
+            lNewStyle = lOldStyle & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_DLGFRAME);
+            lNewStyle |= (lOldStyle & WS_CHILD) ? 0 : WS_POPUP;
+            lNewExStyle = lOldExStyle & ~(WS_EX_CONTEXTHELP | WS_EX_DLGMODALFRAME | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE | WS_EX_WINDOWEDGE | WS_EX_TOOLWINDOW);
+            lNewExStyle |= WS_EX_APPWINDOW;
+        }
+        else
+        {
+            cx = pPresentationParameters->BackBufferWidth;
+            cy = pPresentationParameters->BackBufferHeight;
+            if (!bCenterWindow)
+                uFlags |= SWP_NOMOVE;
+
+            if (nForceWindowStyle) // force windowed style
+            {
+                lOldExStyle &= ~(WS_EX_TOPMOST);
+                lNewStyle = (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX);
+                lNewStyle |= (nForceWindowStyle == 3) ? (WS_THICKFRAME | WS_MAXIMIZEBOX) : 0;
+                lNewExStyle = (WS_EX_APPWINDOW | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE);
+            }
+        }
+        if (nForceWindowStyle) {
+            if (lNewStyle != lOldStyle)
+            {
+                SetWindowLong(hwnd, GWL_STYLE, lNewStyle);
+                uFlags |= SWP_FRAMECHANGED;
+            }
+            if (lNewExStyle != lOldExStyle)
+            {
+                SetWindowLong(hwnd, GWL_EXSTYLE, lNewExStyle);
+                uFlags |= SWP_FRAMECHANGED;
+            }
+        }
+        SetWindowPos(hwnd, bAlwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, left, top, cx, cy, uFlags);
+    }
+}
+
+
+void InitOnline()
+{
+    CIniReader iniReader("");
+    bForceWindowedMode = iniReader.ReadInteger("ONLINE", "ForceWindowedMode", 0) != 0;
+    fFPSLimit = static_cast<float>(iniReader.ReadInteger("ONLINE", "FPSLimit", 60));
+    nFullScreenRefreshRateInHz = iniReader.ReadInteger("ONLINE", "FullScreenRefreshRateInHz", 0);
+    bUsePrimaryMonitor = iniReader.ReadInteger("FORCEWINDOWED", "UsePrimaryMonitor", 0) != 0;
+    bCenterWindow = iniReader.ReadInteger("FORCEWINDOWED", "CenterWindow", 1) != 0;
+    bAlwaysOnTop = iniReader.ReadInteger("FORCEWINDOWED", "AlwaysOnTop", 0) != 0;
+    nForceWindowStyle = iniReader.ReadInteger("FORCEWINDOWED", "ForceWindowStyle", 0);
+
+    if (fFPSLimit)
+    {
+        auto mode = (iniReader.ReadInteger("ONLINE", "FPSLimitMode", 1) == 2) ? FrameLimiter::FPSLimitMode::FPS_ACCURATE : FrameLimiter::FPSLimitMode::FPS_REALTIME;
+        if (mode == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
+            timeBeginPeriod(1);
+
+        static FrameLimiter FpsLimiter;
+        FpsLimiter.Init(mode, fFPSLimit);
+
+        auto pattern = hook::pattern("8B F9 8B 47 30 85 C0 74 18");
+        static auto fpslimiter = safetyhook::create_mid(pattern.get_first(),
+        [](SafetyHookContext& ctx)
+        {
+            FpsLimiter.Sync();
+        });
+    }
+
+    auto pattern = hook::pattern("8B 93 ? ? ? ? 50 8B 84 24 ? ? ? ? 51");
+    struct CreateDeviceHook
+    {
+        void operator()(injector::reg_pack& regs)
+        {
+            regs.edx = *(uint32_t*)(regs.ebx + 0x4594);
+
+            auto pPresentationParameters = (D3DPRESENT_PARAMETERS*)(regs.ebx + 0x45E8);
+            auto hFocusWindow = (HWND)regs.eax;
+
+            g_hFocusWindow = hFocusWindow ? hFocusWindow : pPresentationParameters->hDeviceWindow;
+            if (bForceWindowedMode)
+                ForceWindowed(pPresentationParameters);
+
+            if (nFullScreenRefreshRateInHz)
+                ForceFullScreenRefreshRateInHz(pPresentationParameters);
+        }
+    }; injector::MakeInline<CreateDeviceHook>(pattern.get_first(0), pattern.get_first(6));
 }
 
 CEXP void InitializeASI()
 {
     std::call_once(CallbackHandler::flag, []()
-        {
-            CallbackHandler::RegisterCallback(Init);
-            CallbackHandler::RegisterCallback(L"Window.dll", InitWindow);
-            CallbackHandler::RegisterCallback(L"Engine.dll", InitEngine);
-            CallbackHandler::RegisterCallback(L"D3DDrv.dll", InitD3DDrv);
-            CallbackHandler::RegisterCallback(L"EchelonMenus.dll", InitEchelonMenus);
-            CallbackHandler::RegisterCallback(L"Echelon.dll", InitEchelon);
-        });
+    {
+        CallbackHandler::RegisterCallbackAtGetSystemTimeAsFileTime(Init, hook::pattern("74 ? 68 ? ? ? ? 53 FF D7"));
+        CallbackHandler::RegisterCallback(L"Window.dll", InitWindow);
+        CallbackHandler::RegisterCallback(L"Engine.dll", InitEngine);
+        CallbackHandler::RegisterCallback(L"D3DDrv.dll", InitD3DDrv);
+        CallbackHandler::RegisterCallback(L"EchelonMenus.dll", InitEchelonMenus);
+        CallbackHandler::RegisterCallback(L"Echelon.dll", InitEchelon);
+
+        CallbackHandler::RegisterCallbackAtGetSystemTimeAsFileTime(InitOnline, hook::pattern("8B F9 8B 47 30 85 C0 74 18"));
+    });
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
@@ -1021,6 +1247,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
     if (reason == DLL_PROCESS_ATTACH)
     {
         if (!IsUALPresent()) { InitializeASI(); }
+    }
+    else if (reason == DLL_PROCESS_DETACH)
+    {
+        if (nFrameLimitType == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
+            timeEndPeriod(1);
     }
     return TRUE;
 }

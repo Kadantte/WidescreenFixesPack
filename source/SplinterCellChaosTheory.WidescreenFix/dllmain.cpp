@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include <LEDEffects.h>
 
 struct Screen
 {
@@ -116,9 +117,11 @@ bool bOriginalExe;
 
 float gVisibility = 1.0f;
 int32_t gBlacklistIndicators = 0;
-FLTColor gColor;
+FLTColor gColor = { 0 };
+uint32_t bLightSyncRGB;
 float* __cdecl FGetHSV(float* dest, uint8_t H, uint8_t S, uint8_t V, uint32_t unk)
 {
+    bool bChangeColor = false;
     if ((H == 0x41 && S == 0xC8) || (H == 0x2C && S == 0xCC)  || (H == 0x00 && S == 0xFF && V == 0xFF))
     {
         auto unk_ptr = unk + 20;
@@ -127,21 +130,23 @@ float* __cdecl FGetHSV(float* dest, uint8_t H, uint8_t S, uint8_t V, uint32_t un
             uint32_t unk_val = *(uint32_t*)(unk_ptr);
             if (unk_val == 862 ||unk_val == 879 || unk_val == 881 || unk_val == 875)
             {
+                bChangeColor = true;
                 if (!gColor.empty())
                 {
                     dest[0] = gColor.R;
                     dest[1] = gColor.G;
                     dest[2] = gColor.B;
                     dest[3] = 1.0f;
+
+                    if (gBlacklistIndicators)
+                    {
+                        dest[0] *= gVisibility;
+                        dest[1] *= gVisibility;
+                        dest[2] *= gVisibility;
+                        dest[3] *= gVisibility;
+                    }
+                    return dest;
                 }
-                if (gBlacklistIndicators)
-                {
-                    dest[0] *= gVisibility;
-                    dest[1] *= gVisibility;
-                    dest[2] *= gVisibility;
-                    dest[3] *= gVisibility;
-                }
-                return dest;
             }
         }
     }
@@ -197,6 +202,15 @@ float* __cdecl FGetHSV(float* dest, uint8_t H, uint8_t S, uint8_t V, uint32_t un
     dest[1] = g;
     dest[2] = b;
     dest[3] = a;
+
+    if (bChangeColor && gBlacklistIndicators)
+    {
+        dest[0] *= gVisibility;
+        dest[1] *= gVisibility;
+        dest[2] *= gVisibility;
+        dest[3] *= gVisibility;
+    }
+
     return dest;
 }
 
@@ -215,6 +229,7 @@ void Init()
     auto nFPSLimit = iniReader.ReadInteger("MISC", "FPSLimit", 1000);
     gColor = iniReader.ReadInteger("BONUS", "GogglesLightColor", 0);
     gBlacklistIndicators = iniReader.ReadInteger("BONUS", "BlacklistIndicators", 0);
+    bLightSyncRGB = iniReader.ReadInteger("BONUS", "LightSyncRGB", 1);
 
     if (!Screen.Width || !Screen.Height)
         std::tie(Screen.Width, Screen.Height) = GetDesktopRes();
@@ -575,7 +590,7 @@ void Init()
     }
     
     //Goggles Light Color
-    if (!gColor.empty() || gBlacklistIndicators)
+    if (!gColor.empty() || gBlacklistIndicators || bLightSyncRGB)
     {
         pattern = hook::pattern("E8 ? ? ? ? 8B 8E ? ? ? ? 8B 11 83 C4 10 6A 01 50 6A 14 51");
         injector::MakeCALL(pattern.get_first(0), FGetHSV, true); //0x10CB4325
@@ -596,15 +611,37 @@ void Init()
                     gVisibility = ((float)v / 134.0f);
             }
         }; injector::MakeInline<BlacklistIndicatorsHook>(pattern.get_first()); //0x10B66B97
+
+        if (bLightSyncRGB)
+        {
+            LEDEffects::Inject([]()
+            {
+                static auto fPlayerVisibility = gVisibility;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                auto gVisCmp = static_cast<float>(static_cast<int>(gVisibility * 10.0f)) / 10.0f;
+                auto fPlVisCmp = static_cast<float>(static_cast<int>(fPlayerVisibility * 10.0f)) / 10.0f;
+
+                if (fPlVisCmp > gVisCmp)
+                    fPlayerVisibility -= 0.05f;
+                else if (fPlVisCmp < gVisCmp)
+                    fPlayerVisibility += 0.05f;
+
+                fPlayerVisibility = std::clamp(fPlayerVisibility, 0.0f, 1.0f);
+
+                auto [R, G, B] = LEDEffects::RGBtoPercent(1, 255, 1, fPlayerVisibility);
+
+                LEDEffects::SetLighting(R, G, B, false, false, true);
+            });
+        }
     }
 }
 
 CEXP void InitializeASI()
 {
     std::call_once(CallbackHandler::flag, []()
-        {
-            CallbackHandler::RegisterCallback(Init, hook::pattern("8D 84 24 34 04 00 00 68 ? ? ? ? 50 E8 ? ? ? ? 83 C4 14").count_hint(1).empty(), 0x1100);
-        });
+    {
+        CallbackHandler::RegisterCallbackAtGetSystemTimeAsFileTime(Init, hook::pattern("8D 84 24 34 04 00 00 68 ? ? ? ? 50 E8 ? ? ? ? 83 C4 14"));
+    });
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)

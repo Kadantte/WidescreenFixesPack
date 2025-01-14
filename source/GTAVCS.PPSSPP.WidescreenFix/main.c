@@ -21,6 +21,7 @@
 
 #ifndef __INTELLISENSE__
 PSP_MODULE_INFO(MODULE_NAME, PSP_MODULE_USER, 1, 0);
+_Static_assert(sizeof(MODULE_NAME) - 1 < 28, "MODULE_NAME can't have more than 28 characters");
 #endif
 
 static const float fPSPResW = 480.0f;
@@ -687,6 +688,44 @@ void HandlePCCheats()
         cheat_id = -1;
 }
 
+float* CRect__CRect(float* dest, float f12, float f13, float f14, float f15)
+{
+    if (f12 == 0.0f && f14 == 480.0f)
+    {
+        dest[0] = f12;
+        dest[3] = f13;
+        dest[2] = f14;
+        dest[1] = f15;
+        return dest;
+    }
+
+    float fHudOffset = (((480.0f * fARDiff) - 480.0f) / 2.0f) / fARDiff;
+    dest[0] = (f12 / fARDiff) + fHudOffset;
+    dest[3] = f13;
+    dest[2] = (f14 / fARDiff) + fHudOffset;
+    dest[1] = f15;
+    return dest;
+}
+
+float* CRect__CRect2(float* dest, float f12, float f13, float f14, float f15)
+{
+    if (f12 == 0.0f && f14 == 480.0f)
+    {
+        dest[0] = f12;
+        dest[3] = f13;
+        dest[2] = f14;
+        dest[1] = f15;
+        return dest;
+    }
+
+    float fHudOffset = ((((f14 - f12) * fARDiff) - (f14 - f12)) / 2.0f) / fARDiff;
+    dest[0] = f12;
+    dest[3] = f13;
+    dest[2] = f14 - fHudOffset;
+    dest[1] = f15;
+    return dest;
+}
+
 int OnModuleStart() {
     sceKernelDelayThread(100000);
 
@@ -1264,6 +1303,22 @@ int OnModuleStart() {
         );
         injector.WriteInstr(ptr_1B9438 + 0x10, subs(f22, f0, f30));
         injector.WriteInstr(ptr_1B9438 + 0x38, adds(f28, f12, f30));
+
+        // Controller icons in menu
+        uintptr_t ptr_89043E8 = pattern.get(0, "E0 7B 80 46 48 00 04 26", -4);
+        injector.MakeJAL(ptr_89043E8, (intptr_t)CRect__CRect2);
+        
+        //Map Legend Text
+        uintptr_t ptr_88116CC = pattern.get(0, "E0 7B 80 46 04 00 A6 27", -4);
+        injector.MakeJAL(ptr_88116CC, (intptr_t)CRect__CRect2);
+
+        //ControllerMenu
+        uintptr_t ptr_8B3FD50 = pattern.get(0, "E0 7B 80 46 25 20 A0 03 FF 00 05 34 FF 00 06 34 FF 00 07 34 ? ? ? ? FF 00 08 34 25 20 00 02 ? ? ? ? 25 28 40 00 11 01 44 92", -4);
+        injector.MakeJAL(ptr_8B3FD50, (intptr_t)CRect__CRect);
+        uintptr_t ptr_8B3FE38 = pattern.get(0, "80 63 0E 46 25 20 A0 03", -4);
+        injector.MakeJAL(ptr_8B3FE38, (intptr_t)CRect__CRect);
+        uintptr_t ptr_8B3FF0C = pattern.get(0, "E0 7B 80 46 25 20 A0 03 FF 00 05 34 FF 00 06 34 FF 00 07 34 ? ? ? ? FF 00 08 34 25 20 00 02 ? ? ? ? 25 28 40 00 08 01 44 8E", -4);
+        injector.MakeJAL(ptr_8B3FF0C, (intptr_t)CRect__CRect);
     }
 
     /* Radar */
@@ -1328,6 +1383,15 @@ int OnModuleStart() {
     {
         uintptr_t ptr_2D0EF4 = pattern.get(0, "25 20 00 02 00 00 12 34 25 20 20 02", -4);
         injector.MakeNOP(ptr_2D0EF4);
+    }
+
+    // Script Commands Fixes
+    {
+        uintptr_t ptr_8AE8E30 = pattern.get(0, "28 00 25 2A ? ? ? ? 00 00 00 00", -4);
+        injector.WriteInstr(ptr_8AE8E30, 0x06200004); //blez -> bltz
+
+        uintptr_t ptr_8A12A94 = pattern.get(0, "DB 01 25 2A ? ? ? ? 00 00 00 00", -4);
+        injector.WriteInstr(ptr_8A12A94, 0x06200004); //blez -> bltz
     }
 
     if (LODDistMultiplier)

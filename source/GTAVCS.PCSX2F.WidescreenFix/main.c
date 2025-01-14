@@ -94,7 +94,8 @@ uintptr_t GetAbsoluteAddress(uintptr_t at, int32_t offs_hi, int32_t offs_lo)
 float (*game_atan2f)(float a1, float a2);
 float AdjustFOV(float f, float ar, float t)
 {
-    return ((2.0f * game_atan2f(((ar) / (4.0f / 3.0f)) * t, 1.0f)) * (180.0f / (float)M_PI) * 100.0f) / 100.0f;
+    uint32_t CGame__currArea = *(uint32_t*)(0x489F7C);
+    return ((2.0f * game_atan2f(((ar) / ((CGame__currArea == 0) ? (16.0f / 9.0f) : (4.0f / 3.0f))) * t, 1.0f)) * (180.0f / (float)M_PI) * 100.0f) / 100.0f;
 }
 
 const float fDefaultFOV = 70.0f;
@@ -260,7 +261,7 @@ void init()
         {
             //logger.Write("Fixing FOV...");
             uintptr_t ptr_44A648 = pattern.get(0, "90 FF BD 27 58 00 B5 E7 50 00 B4 E7 46 6D 00 46", 0);
-            game_atan2f = (float (*)(float))ptr_44A648;
+            game_atan2f = (float (*)(float, float))ptr_44A648;
             uintptr_t ptr_21CD68 = pattern.get(0, "03 84 10 00 03 8C 11 00 03 94 12 00 03 9C 13 00 03 A4 14 00 03 AC 15 00", 0);
             flt_487484 = (float*)GetAbsoluteAddress(ptr_21CD68, 32, 48);
             temp_t = tan(fDefaultFOV / 2.0f * ((float)M_PI / 180.0f));
@@ -344,13 +345,13 @@ void init()
             injector.MakeInlineLUIORI(0x119034, ((5.333333f * Screen.fHudScale)));
             MakeInlineWrapper(0x119174, mtc1(at, f0), lui(at, HIWORD(Screen.fHudScale)), addiu(at, at, LOWORD(Screen.fHudScale)), mtc1(at, f31), muls(f0, f0, f31));
             injector.WriteInstr(0x21f654, (li(s1, (int16_t)round_f(210.0f * Screen.fHudScale))));
-            injector.MakeInlineLUIORI(0x2625BC, Screen.fHudScale); // game text
+            injector.MakeInlineLUIORI(0x2625BC, Screen.fHudScale / 0.75f); // game text, 0.75 is for some kind of og bug
             //injector.MakeInlineLUIORI(0x265460, Screen.fAspectRatio); //ar
             //0x2AEC9C todo menu or script
 
             const float f1_25 = (((4.0f / 3.0f) / (16.0f / 9.0f)) * (10.0f / 6.0f));
             float ARDiff = (16.0f / 9.0f) / (Screen.fAspectRatio);
-            float bar_left_edge_offset_from_right = 11.0f * ARDiff;
+            float bar_left_edge_offset_from_right = 10.0f * ARDiff;
             const float f15 = 15.0f;
             float fWeaponIconPos = (360.0f + f15 + 64.0f + (26.0f * ARDiff)); //465.0f
             float fWeaponIconSize = 45.5f * ARDiff;
@@ -389,10 +390,11 @@ void init()
             injector.MakeInlineLUIORI(0x31ec64, (fBarsPos + bar_left_edge_offset_from_right)); //money and time pos
             injector.MakeInlineLUIORI(0x31ecbc, (fBarsPos + bar_left_edge_offset_from_right)); //money and time pos
             injector.MakeInlineLUIORI(0x31eea0, (fBarsPos + bar_left_edge_offset_from_right)); //money and time pos
-            injector.MakeInlineLUIORI(0x31efe8, 9.0f * ARDiff); //money and time scale
-            injector.MakeInlineLUIORI(0x31f1d4, 2.0f * ARDiff); // money and time spacing, not adjusted by ws option originally
             injector.MakeInlineLUIORI(0x31f5b4, fWeaponIconPos); //weapon icon pos
             injector.MakeInlineLUIORI(0x31f648, fWeaponIconSize); // weapon icon size
+            injector.MakeInlineLUIORI(0x31FB3C, (438.0f - 2.0f)); // ammo pos 1
+            injector.MakeInlineLUIORI(0x31FB5C, (438.0f - 2.0f) + (6.0f * 0.75f)); // ammo pos 2
+            injector.MakeInlineLUIORI(0x31F8D8, 0.24f * 0.90f); // ammo font size
             injector.MakeInlineLUIORI(0x31ff94, 13.5f - 2.5f);
             injector.MakeInlineLUIORI(0x320b40, (405.0f + 10.0f));
             injector.MakeInlineLUIORI(0x31f2ac, (float)round_f((64.0f * Screen.fHudScale))); //radar scale
@@ -440,8 +442,9 @@ void init()
             injector.MakeInlineLUIORI(0x3215E8, (4.0f * Screen.fHudScale));
 
             // Clock Text Thingies
+            injector.MakeLUIORI(0x31efe8, at, 9.0f * ARDiff); //money and time scale
             injector.MakeInlineLUIORI(0x31F1D4, (2.0f * ARDiff));
-            //injector.MakeInlineLUIORI(0x31F1EC, (4.0f * ARDiff));
+            injector.MakeLUIORI(0x31F1EC, at, (4.0f * ARDiff));
             injector.MakeInlineLUIORI(0x31F10C, (3.0f * ARDiff));
         }
     }
@@ -477,7 +480,7 @@ void init()
         MakeInlineWrapper(0x37281C,
             lui(at, 0x40A0),
             move(a0, s0),
-            jal(isLittleWillie),
+            jal((uintptr_t)isLittleWillie),
             nop()
         );
     }

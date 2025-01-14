@@ -21,6 +21,7 @@
 
 #ifndef __INTELLISENSE__
 PSP_MODULE_INFO(MODULE_NAME, PSP_MODULE_USER, 1, 0);
+_Static_assert(sizeof(MODULE_NAME) - 1 < 28, "MODULE_NAME can't have more than 28 characters");
 #endif
 
 #ifndef __INTELLISENSE__
@@ -343,7 +344,7 @@ void CParticle__AddParticleHookVCS(uint32_t type, uint32_t vecPos)
     RwV3d* point = (RwV3d*)vecPos;
 
     if (type == WATER_SPARK || type == WHEEL_WATER || type == WATER || type == WATER_HYDRANT ||
-        type == WATERSPRAY || type == BOAT_THRUSTJET || type == WATER_CANNON ||
+        /*type == WATERSPRAY ||*/ type == BOAT_THRUSTJET || type == WATER_CANNON ||
         type == BLOOD || type == BLOOD_SMALL || type == BLOOD_SPURT)
     {
         data->FillScreenMoving_Vec_x = point->x;
@@ -374,7 +375,7 @@ void CParticle__AddParticleHookLCS(uint32_t type, uint32_t vecPos)
     RwV3d* point = (RwV3d*)vecPos;
 
     if (type == LCS_WATER_SPARK || type == LCS_WHEEL_WATER || type == LCS_WATER || type == LCS_WATER_HYDRANT ||
-        type == LCS_WATERSPRAY || type == LCS_BOAT_THRUSTJET || type == LCS_WATER_CANNON ||
+        /*type == LCS_WATERSPRAY ||*/ type == LCS_BOAT_THRUSTJET || type == LCS_WATER_CANNON ||
         type == LCS_BLOOD || type == LCS_BLOOD_SMALL || type == LCS_BLOOD_SPURT)
     {
         data->FillScreenMoving_Vec_x = point->x;
