@@ -17,15 +17,14 @@ on:
 
 jobs:
   build:
-    runs-on: windows-2022
-    strategy:
-      matrix:
-        platform: [Win32]
-        buildtype: [Release]
+    runs-on: windows-latest
 
     steps:
     - name: Checkout Repo
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
     - name: Build All
       uses: ./.github/workflows/build_all
       with:
@@ -61,7 +60,7 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
         tag: gtavcs
-        artifacts: data/Archives/GTAVCS.PCSX2F.WidescreenFix.zip, data/Archives/GTAVCS.PCSX2F.Project2DFX.zip
+        artifacts: data/Archives/GTAVCS.PCSX2F.WidescreenFix.zip, data/Archives/GTAVCS.PCSX2F.Project2DFX.zip, data/Archives/GTAVCS.PCSX2F.ImVehLM.zip
 
     - name: GTA Liberty City Stories Widescreen Fix [PPSSPP]
       uses: ./.github/workflows/release_tag
@@ -271,6 +270,14 @@ jobs:
         tag: driv3r
         artifacts: data/Archives/Driv3r.WidescreenFix.zip
 
+    - name: The Saboteur Fusion Fix
+      uses: ./.github/workflows/release_tag
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
+        tag: thesaboteur
+        artifacts: data/Archives/TheSaboteur.FusionFix.zip
+
     - name: The Suffering Widescreen Fix
       uses: ./.github/workflows/release_tag
       with:
@@ -407,29 +414,29 @@ jobs:
         tag: gun
         artifacts: data/Archives/Gun.WidescreenFix.zip
 
-    - name: Flatout Ultimate Carnage Widescreen Fix
+    - name: SOCOM U.S. Navy SEALs Fireteam Bravo Fusion Mod
       uses: ./.github/workflows/release_tag
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
-        tag: flatoutuc
-        artifacts: data/Archives/FlatoutUltimateCarnage.WidescreenFix.zip
+        tag: fireteambravo1
+        artifacts: data/Archives/SOCOM.FireteamBravo.PPSSPP.FusionMod.zip
 
-    - name: Flatout 2 Widescreen Fix
+    - name: SOCOM U.S. Navy SEALs Fireteam Bravo 2 Fusion Mod
       uses: ./.github/workflows/release_tag
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
-        tag: flatout2
-        artifacts: data/Archives/Flatout2.WidescreenFix.zip
+        tag: fireteambravo2
+        artifacts: data/Archives/SOCOM.FireteamBravo2.PPSSPP.FusionMod.zip
 
-    - name: Flatout Widescreen Fix
+    - name: SOCOM U.S. Navy SEALs Fireteam Bravo 3 Fusion Mod
       uses: ./.github/workflows/release_tag
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
-        tag: flatout
-        artifacts: data/Archives/Flatout.WidescreenFix.zip
+        tag: fireteambravo3
+        artifacts: data/Archives/SOCOM.FireteamBravo3.PPSSPP.FusionMod.zip
 
     - name: Devil May Cry 3 Widescreen Fix
       uses: ./.github/workflows/release_tag
@@ -613,7 +620,7 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
         tag: truecrimenyc
-        artifacts: data/Archives/TrueCrimeNewYorkCity.WidescreenFix.zip
+        artifacts: data/Archives/TrueCrimeNewYorkCity.WidescreenFix.zip, data/Archives/TrueCrimeNewYorkCity.PCSX2F.WidescreenFix.zip
 
     - name: Stubbs the Zombie Widescreen Fix
       uses: ./.github/workflows/release_tag
@@ -655,6 +662,14 @@ jobs:
         tag: scc
         artifacts: data/Archives/SplinterCellConviction.FusionMod.zip
 
+    - name: Splinter Cell Blacklist Fusion Mod
+      uses: ./.github/workflows/release_tag
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
+        tag: scb
+        artifacts: data/Archives/SplinterCellBlacklist.FusionMod.zip
+
     - name: Splinter Cell Pandora Tomorrow Widescreen Fix
       uses: ./.github/workflows/release_tag
       with:
@@ -670,6 +685,14 @@ jobs:
         tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
         tag: sc
         artifacts: data/Archives/SplinterCell.WidescreenFix.zip
+
+    - name: Spyro Reignited Trilogy Widescreen Fix
+      uses: ./.github/workflows/release_tag
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
+        tag: spyro
+        artifacts: data/Archives/SpyroReignitedTrilogy.WidescreenFix.zip
 
     - name: Sniper Elite Widescreen Fix
       uses: ./.github/workflows/release_tag
@@ -687,21 +710,61 @@ jobs:
         tag: sonicheroes
         artifacts: data/Archives/SonicHeroes.WidescreenFix.zip
 
-    - name: Resident Evil 2 Fusion Mod [Dolphin]
+    - name: Red Dead Redemption Fusion Mod
       uses: ./.github/workflows/release_tag
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
-        tag: re2gc
-        artifacts: data/Archives/ResidentEvil2.Dolphin.FusionMod.zip
+        tag: rdr
+        artifacts: data/Archives/RedDeadRedemption.FusionMod.zip
 
-    - name: Resident Evil 3 Nemesis Fusion Mod [Dolphin]
+    - name: Resident Evil 0 Fusion Fix
       uses: ./.github/workflows/release_tag
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
-        tag: re3gc
-        artifacts: data/Archives/ResidentEvil3.Dolphin.FusionMod.zip
+        tag: re0
+        artifacts: data/Archives/ResidentEvil0.FusionFix.zip
+
+    - name: Resident Evil Fusion Fix
+      uses: ./.github/workflows/release_tag
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
+        tag: re1
+        artifacts: data/Archives/ResidentEvil.FusionFix.zip
+
+    - name: Resident Evil 2 and RE3 Nemesis Fusion Mod [Dolphin]
+      uses: ./.github/workflows/release_tag
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
+        tag: re2re3gc
+        artifacts: data/Archives/ResidentEvil2.RE3.Dolphin.FusionMod.zip
+
+    - name: Resident Evil 4 Fusion Mod
+      uses: ./.github/workflows/release_tag
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
+        tag: re4
+        artifacts: data/Archives/ResidentEvil4.FusionMod.zip
+
+    - name: Resident Evil 5 Fusion Fix
+      uses: ./.github/workflows/release_tag
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
+        tag: re5
+        artifacts: data/Archives/ResidentEvil5.FusionFix.zip
+
+    - name: Resident Evil 6 Fusion Fix
+      uses: ./.github/workflows/release_tag
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
+        tag: re6
+        artifacts: data/Archives/ResidentEvil6.FusionFix.zip
 
     - name: Resident Evil Revelations Fusion Fix
       uses: ./.github/workflows/release_tag
@@ -718,14 +781,6 @@ jobs:
         tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
         tag: rerev2
         artifacts: data/Archives/ResidentEvilRevelations2.FusionFix.zip
-
-    - name: Resident Evil 6 Fusion Fix
-      uses: ./.github/workflows/release_tag
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        tag_list: ${{ format('{0},{1}', github.event.inputs.tag_list, inputs.tag_list) }}
-        tag: re6
-        artifacts: data/Archives/ResidentEvil6.FusionFix.zip
 
     - name: Xbox Rain Droplets Plugins
       uses: ./.github/workflows/release_tag

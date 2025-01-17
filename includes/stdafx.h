@@ -14,18 +14,23 @@
 #include <set>
 #include <map>
 #include <iomanip>
+#include <future>
+#include <shlobj.h>
 #include "IniReader.h"
 #include "injector\injector.hpp"
 #include "injector\calling.hpp"
 #include "injector\hooking.hpp"
-#ifdef _M_IX86
 #include "injector\assembly.hpp"
-#endif
 #include "injector\utility.hpp"
 #include "Hooking.Patterns.h"
+#include "callbacks.h"
 #include "log.h"
 #include "ModuleList.hpp"
+#include "Trampoline.h"
 #include <filesystem>
+#include <stacktrace>
+#include <shellapi.h>
+#include <ranges>
 #pragma warning(pop)
 
 #ifndef CEXP
@@ -34,17 +39,40 @@
 
 float GetFOV(float f, float ar);
 float GetFOV2(float f, float ar);
-float AdjustFOV(float f, float ar);
+float AdjustFOV(float f, float ar, float base_ar = (4.0f / 3.0f));
 
+bool IsModuleUAL(HMODULE mod);
 bool IsUALPresent();
 void CreateThreadAutoClose(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId);
 std::tuple<int32_t, int32_t> GetDesktopRes();
 void GetResolutionsList(std::vector<std::string>& list);
 uint32_t GetDesktopRefreshRate();
 std::string format(const char* fmt, ...);
+uint32_t crc32(uint32_t crc, const void* buf, size_t size);
 
 HICON CreateIconFromBMP(UCHAR* data);
 HICON CreateIconFromResourceICO(UINT nID, int32_t cx, int32_t cy);
+
+BOOL CreateProcessInJob(
+    HANDLE hJob,
+    LPCTSTR lpApplicationName,
+    LPTSTR lpCommandLine,
+    LPSECURITY_ATTRIBUTES lpProcessAttributes,
+    LPSECURITY_ATTRIBUTES lpThreadAttributes,
+    BOOL bInheritHandles,
+    DWORD dwCreationFlags,
+    LPVOID lpEnvironment,
+    LPCTSTR lpCurrentDirectory,
+    LPSTARTUPINFO lpStartupInfo,
+    LPPROCESS_INFORMATION ppi);
+
+BOOL CreateProcessInJobAsAdmin(
+    HANDLE hJob,
+    LPCTSTR lpApplicationName,
+    LPTSTR lpCommandLine,
+    int nShow,
+    LPCTSTR lpCurrentDirectory,
+    LPPROCESS_INFORMATION ppi);
 
 template<typename T>
 std::array<uint8_t, sizeof(T)> to_bytes(const T& object)
@@ -98,22 +126,61 @@ std::string pattern_str(T t, Rest... rest)
     return std::string((std::is_same<T, char>::value ? format("%c ", t) : format("%02X ", t)) + pattern_str(rest...));
 }
 
+template <size_t count = 1, typename... Args>
+hook::pattern find_pattern(Args... args)
+{
+    hook::pattern pattern;
+    ((pattern = hook::pattern(args), !pattern.count_hint(count).empty()) || ...);
+    return pattern;
+}
+
 template<size_t N>
 constexpr size_t length(char const (&)[N])
 {
     return N - 1;
 }
 
-template <typename T, typename V>
-bool iequals(const T& s1, const V& s2)
+inline bool iequals(const std::string_view s1, const std::string_view s2)
 {
-    T str1(s1); T str2(s2);
+    std::string str1(s1); std::string str2(s2);
     std::transform(str1.begin(), str1.end(), str1.begin(), ::tolower);
     std::transform(str2.begin(), str2.end(), str2.begin(), ::tolower);
     return (str1 == str2);
 }
 
-template<class T>
+inline bool iequals(const std::wstring_view s1, const std::wstring_view s2)
+{
+    std::wstring str1(s1); std::wstring str2(s2);
+    std::transform(str1.begin(), str1.end(), str1.begin(), ::towlower);
+    std::transform(str2.begin(), str2.end(), str2.begin(), ::towlower);
+    return (str1 == str2);
+}
+
+inline bool starts_with(const std::string_view str, const std::string_view prefix, bool case_sensitive)
+{
+    if (!case_sensitive)
+    {
+        std::string str1(str); std::string str2(prefix);
+        std::transform(str1.begin(), str1.end(), str1.begin(), ::tolower);
+        std::transform(str2.begin(), str2.end(), str2.begin(), ::tolower);
+        return str1.starts_with(str2);
+    }
+    return str.starts_with(prefix);
+}
+
+inline bool starts_with(const std::wstring_view str, const std::wstring_view prefix, bool case_sensitive)
+{
+    if (!case_sensitive)
+    {
+        std::wstring str1(str); std::wstring str2(prefix);
+        std::transform(str1.begin(), str1.end(), str1.begin(), ::towlower);
+        std::transform(str2.begin(), str2.end(), str2.begin(), ::towlower);
+        return str1.starts_with(str2);
+    }
+    return str.starts_with(prefix);
+}
+
+template<class T = std::filesystem::path>
 T GetModulePath(HMODULE hModule)
 {
     static constexpr auto INITIAL_BUFFER_SIZE = MAX_PATH;
@@ -167,7 +234,7 @@ T GetModulePath(HMODULE hModule)
     return T();
 }
 
-template<class T>
+template<class T = std::filesystem::path>
 T GetThisModulePath()
 {
     HMODULE hm = NULL;
@@ -182,7 +249,7 @@ T GetThisModulePath()
     return r;
 }
 
-template<class T>
+template<class T = std::filesystem::path>
 T GetThisModuleName()
 {
     HMODULE hm = NULL;
@@ -197,7 +264,7 @@ T GetThisModuleName()
         return moduleFileName.substr(moduleFileName.find_last_of(L"/\\") + 1);
 }
 
-template<class T>
+template<class T = std::filesystem::path>
 T GetExeModulePath()
 {
     T r = GetModulePath<T>(NULL);
@@ -211,7 +278,7 @@ T GetExeModulePath()
     return r;
 }
 
-template<class T>
+template<class T = std::filesystem::path>
 T GetExeModuleName()
 {
     const T moduleFileName = GetModulePath<T>(NULL);
@@ -223,7 +290,7 @@ T GetExeModuleName()
         return moduleFileName.substr(moduleFileName.find_last_of(L"/\\") + 1);
 }
 
-template<class T>
+template<class T = std::filesystem::path>
 T GetCurrentDirectoryW()
 {
     static constexpr auto INITIAL_BUFFER_SIZE = MAX_PATH;
@@ -299,252 +366,16 @@ bool fileExists(T fileName)
     return infile.good();
 }
 
-class CallbackHandler
+inline std::filesystem::path GetKnownFolderPath(REFKNOWNFOLDERID rfid, DWORD dwFlags, HANDLE hToken)
 {
-public:
-    static inline void RegisterCallback(std::function<void()>&& fn)
+    std::filesystem::path r;
+    WCHAR* szSystemPath = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(rfid, dwFlags, hToken, &szSystemPath)))
     {
-        fn();
+        r = szSystemPath;
     }
-
-    static inline void RegisterCallback(std::wstring_view module_name, std::function<void()>&& fn)
-    {
-        if (module_name.empty() || GetModuleHandleW(module_name.data()) != NULL)
-        {
-            fn();
-        }
-        else
-        {
-            RegisterDllNotification();
-            GetCallbackList().emplace(module_name, std::forward<std::function<void()>>(fn));
-        }
-    }
-
-    static inline void RegisterCallback(std::function<void()>&& fn, bool bPatternNotFound, ptrdiff_t offset = 0x1100, uint32_t* ptr = nullptr)
-    {
-        if (!bPatternNotFound)
-        {
-            fn();
-        }
-        else
-        {
-            auto mh = GetModuleHandle(NULL);
-            IMAGE_NT_HEADERS* ntHeader = (IMAGE_NT_HEADERS*)((DWORD)mh + ((IMAGE_DOS_HEADER*)mh)->e_lfanew);
-            if (ptr == nullptr)
-                ptr = (uint32_t*)((DWORD)mh + ntHeader->OptionalHeader.BaseOfCode + ntHeader->OptionalHeader.SizeOfCode - offset);
-            std::thread([](std::function<void()>&& fn, uint32_t* ptr, uint32_t val)
-            {
-                while (*ptr == val)
-                    std::this_thread::yield();
-
-                fn();
-            }, fn, ptr, *ptr).detach();
-        }
-    }
-
-    static inline void RegisterCallback(std::function<void()>&& fn, hook::pattern pattern)
-    {
-        if (!pattern.empty())
-        {
-            fn();
-        }
-        else
-        {
-            auto* ptr = new ThreadParams{ fn, pattern };
-            CreateThreadAutoClose(0, 0, (LPTHREAD_START_ROUTINE)&ThreadProc, (LPVOID)ptr, 0, NULL);
-        }
-    }
-
-private:
-    static inline void call(std::wstring_view module_name)
-    {
-        if (GetCallbackList().count(module_name.data()))
-        {
-            GetCallbackList().at(module_name.data())();
-            //GetCallbackList().erase(module_name.data()); //shouldn't do that in case dll with callback gets unloaded and loaded again
-        }
-
-        //if (GetCallbackList().empty()) //win7 crash in splinter cell
-        //    UnRegisterDllNotification();
-    }
-
-    static inline void invoke_all()
-    {
-        for (auto&& fn : GetCallbackList())
-            fn.second();
-    }
-
-private:
-    struct Comparator
-    {
-        bool operator() (const std::wstring& s1, const std::wstring& s2) const
-        {
-            std::wstring str1(s1.length(), ' ');
-            std::wstring str2(s2.length(), ' ');
-            std::transform(s1.begin(), s1.end(), str1.begin(), tolower);
-            std::transform(s2.begin(), s2.end(), str2.begin(), tolower);
-            return  str1 < str2;
-        }
-    };
-
-    static std::map<std::wstring, std::function<void()>, Comparator>& GetCallbackList()
-    {
-        return functions;
-    }
-
-    struct ThreadParams
-    {
-        std::function<void()> fn;
-        hook::pattern pattern;
-    };
-
-    typedef NTSTATUS(NTAPI* _LdrRegisterDllNotification) (ULONG, PVOID, PVOID, PVOID);
-    typedef NTSTATUS(NTAPI* _LdrUnregisterDllNotification) (PVOID);
-
-    typedef struct _LDR_DLL_LOADED_NOTIFICATION_DATA
-    {
-        ULONG Flags;                    //Reserved.
-        PUNICODE_STRING FullDllName;    //The full path name of the DLL module.
-        PUNICODE_STRING BaseDllName;    //The base file name of the DLL module.
-        PVOID DllBase;                  //A pointer to the base address for the DLL in memory.
-        ULONG SizeOfImage;              //The size of the DLL image, in bytes.
-    } LDR_DLL_LOADED_NOTIFICATION_DATA, LDR_DLL_UNLOADED_NOTIFICATION_DATA, *PLDR_DLL_LOADED_NOTIFICATION_DATA, *PLDR_DLL_UNLOADED_NOTIFICATION_DATA;
-
-    typedef union _LDR_DLL_NOTIFICATION_DATA
-    {
-        LDR_DLL_LOADED_NOTIFICATION_DATA Loaded;
-        LDR_DLL_UNLOADED_NOTIFICATION_DATA Unloaded;
-    } LDR_DLL_NOTIFICATION_DATA, *PLDR_DLL_NOTIFICATION_DATA;
-
-    typedef NTSTATUS(NTAPI* PLDR_MANIFEST_PROBER_ROUTINE)
-    (
-        IN HMODULE DllBase,
-        IN PCWSTR FullDllPath,
-        OUT PHANDLE ActivationContext
-    );
-
-    typedef NTSTATUS(NTAPI* PLDR_ACTX_LANGUAGE_ROURINE)
-    (
-        IN HANDLE Unk,
-        IN USHORT LangID,
-        OUT PHANDLE ActivationContext
-    );
-
-    typedef void(NTAPI* PLDR_RELEASE_ACT_ROUTINE)
-    (
-        IN HANDLE ActivationContext
-    );
-
-    typedef VOID(NTAPI* fnLdrSetDllManifestProber)
-    (
-        IN PLDR_MANIFEST_PROBER_ROUTINE ManifestProberRoutine,
-        IN PLDR_ACTX_LANGUAGE_ROURINE CreateActCtxLanguageRoutine,
-        IN PLDR_RELEASE_ACT_ROUTINE ReleaseActCtxRoutine
-    );
-
-private:
-    static inline void CALLBACK LdrDllNotification(ULONG NotificationReason, PLDR_DLL_NOTIFICATION_DATA NotificationData, PVOID Context)
-    {
-        static constexpr auto LDR_DLL_NOTIFICATION_REASON_LOADED = 1;
-        if (NotificationReason == LDR_DLL_NOTIFICATION_REASON_LOADED)
-        {
-            call(NotificationData->Loaded.BaseDllName->Buffer);
-        }
-    }
-
-    static inline NTSTATUS NTAPI ProbeCallback(IN HMODULE DllBase, IN PCWSTR FullDllPath, OUT PHANDLE ActivationContext)
-    {
-        //wprintf(L"ProbeCallback: Base %p, path '%ls', context %p\r\n", DllBase, FullDllPath, *ActivationContext);
-
-        std::wstring str(FullDllPath);
-        call(str.substr(str.find_last_of(L"/\\") + 1));
-
-        //if (!*ActivationContext)
-        //    return STATUS_INVALID_PARAMETER; // breaks on xp
-
-        HANDLE actx = NULL;
-        ACTCTXW act = { 0 };
-
-        act.cbSize = sizeof(act);
-        act.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID;
-        act.lpSource = FullDllPath;
-        act.hModule = DllBase;
-        act.lpResourceName = ISOLATIONAWARE_MANIFEST_RESOURCE_ID;
-
-        // Reset pointer, crucial for x64 version
-        *ActivationContext = 0;
-
-        actx = CreateActCtxW(&act);
-
-        // Report no manifest is present
-        if (actx == INVALID_HANDLE_VALUE)
-            return 0xC000008B; //STATUS_RESOURCE_NAME_NOT_FOUND;
-
-        *ActivationContext = actx;
-
-        return STATUS_SUCCESS;
-    }
-
-    static inline void RegisterDllNotification()
-    {
-        LdrRegisterDllNotification = (_LdrRegisterDllNotification)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "LdrRegisterDllNotification");
-        if (LdrRegisterDllNotification)
-        {
-            if (!cookie)
-                LdrRegisterDllNotification(0, LdrDllNotification, 0, &cookie);
-        }
-        else
-        {
-            LdrSetDllManifestProber = (fnLdrSetDllManifestProber)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "LdrSetDllManifestProber");
-            if (LdrSetDllManifestProber)
-            {
-                LdrSetDllManifestProber(&ProbeCallback, NULL, &ReleaseActCtx);
-            }
-        }
-    }
-
-    static inline void UnRegisterDllNotification()
-    {
-        LdrUnregisterDllNotification = (_LdrUnregisterDllNotification)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "LdrUnregisterDllNotification");
-        if (LdrUnregisterDllNotification && cookie)
-            LdrUnregisterDllNotification(cookie);
-    }
-
-    static inline DWORD WINAPI ThreadProc(LPVOID ptr)
-    {
-        auto paramsPtr = static_cast<CallbackHandler::ThreadParams*>(ptr);
-        auto params = *paramsPtr;
-        delete paramsPtr;
-
-        HANDLE hTimer = NULL;
-        LARGE_INTEGER liDueTime;
-        liDueTime.QuadPart = -30 * 10000000LL;
-        hTimer = CreateWaitableTimer(NULL, TRUE, NULL);
-        SetWaitableTimer(hTimer, &liDueTime, 0, NULL, NULL, 0);
-
-        while (params.pattern.clear().empty())
-        {
-            Sleep(0);
-
-            if (WaitForSingleObject(hTimer, 0) == WAIT_OBJECT_0)
-            {
-                CloseHandle(hTimer);
-                return 0;
-            }
-        };
-
-        params.fn();
-
-        return 0;
-    }
-private:
-    static inline _LdrRegisterDllNotification   LdrRegisterDllNotification;
-    static inline _LdrUnregisterDllNotification LdrUnregisterDllNotification;
-    static inline void* cookie;
-    static inline fnLdrSetDllManifestProber     LdrSetDllManifestProber;
-public:
-    static inline std::once_flag flag;
-    static std::map<std::wstring, std::function<void()>, Comparator> functions;
+    CoTaskMemFree(szSystemPath);
+    return r;
 };
 
 class RegistryWrapper
@@ -843,6 +674,45 @@ public:
     }
 };
 
+namespace AffinityChanges
+{
+    static inline DWORD_PTR gameThreadAffinity = 0;
+    static inline bool Init()
+    {
+        DWORD_PTR processAffinity, systemAffinity;
+        if (!GetProcessAffinityMask(GetCurrentProcess(), &processAffinity, &systemAffinity))
+        {
+            return false;
+        }
+
+        DWORD_PTR otherCoresAff = (processAffinity - 1) & processAffinity;
+        if (otherCoresAff == 0) // Only one core is available for the game
+        {
+            return false;
+        }
+        gameThreadAffinity = processAffinity & ~otherCoresAff;
+
+        SetThreadAffinityMask(GetCurrentThread(), gameThreadAffinity);
+
+        return true;
+    }
+
+    static inline HANDLE WINAPI CreateThread_GameThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress,
+        PVOID lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId)
+    {
+        HANDLE hThread = CreateThread(lpThreadAttributes, dwStackSize, lpStartAddress, lpParameter, dwCreationFlags | CREATE_SUSPENDED, lpThreadId);
+        if (hThread != nullptr)
+        {
+            SetThreadAffinityMask(hThread, gameThreadAffinity);
+            if ((dwCreationFlags & CREATE_SUSPENDED) == 0) // Resume only if the game didn't pass CREATE_SUSPENDED
+            {
+                ResumeThread(hThread);
+            }
+        }
+        return hThread;
+    }
+}
+
 namespace WindowedModeWrapper
 {
     static bool bBorderlessWindowed = true;
@@ -956,7 +826,7 @@ namespace WindowedModeWrapper
     static HWND WINAPI CreateWindowExA_Hook(DWORD dwExStyle, LPCSTR lpClassName, LPCSTR lpWindowName, DWORD dwStyle, int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam)
     {
         auto[WindowPosX, WindowPosY, newWidth, newHeight] = beforeCreateWindow(nWidth, nHeight);
-        GameHWND = CreateWindowExA(dwExStyle, lpClassName, lpWindowName, 0, WindowPosX, WindowPosY, newWidth, newHeight, hWndParent, hMenu, hInstance, lpParam);
+        GameHWND = CreateWindowExA(dwExStyle, lpClassName, lpWindowName, dwStyle, WindowPosX, WindowPosY, newWidth, newHeight, hWndParent, hMenu, hInstance, lpParam);
         afterCreateWindow();
         return GameHWND;
     }
@@ -964,7 +834,7 @@ namespace WindowedModeWrapper
     static HWND WINAPI CreateWindowExW_Hook(DWORD dwExStyle, LPCWSTR lpClassName, LPCWSTR lpWindowName, DWORD dwStyle, int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam)
     {
         auto [WindowPosX, WindowPosY, newWidth, newHeight] = beforeCreateWindow(nWidth, nHeight);
-        GameHWND = CreateWindowExW(dwExStyle, lpClassName, lpWindowName, 0, WindowPosX, WindowPosY, newWidth, newHeight, hWndParent, hMenu, hInstance, lpParam);
+        GameHWND = CreateWindowExW(dwExStyle, lpClassName, lpWindowName, dwStyle, WindowPosX, WindowPosY, newWidth, newHeight, hWndParent, hMenu, hInstance, lpParam);
         afterCreateWindow();
         return GameHWND;
     }
@@ -1022,4 +892,334 @@ namespace WindowedModeWrapper
         }
         return res;
     }
+};
+
+class IATHook
+{
+public:
+    template <class... Ts>
+    static auto Replace(HMODULE target_module, std::string_view dll_name, Ts&& ... inputs)
+    {
+        std::map<std::string, std::future<void*>> originalPtrs;
+
+        const DWORD_PTR instance = reinterpret_cast<DWORD_PTR>(target_module);
+        const PIMAGE_NT_HEADERS ntHeader = reinterpret_cast<PIMAGE_NT_HEADERS>(instance + reinterpret_cast<PIMAGE_DOS_HEADER>(instance)->e_lfanew);
+        PIMAGE_IMPORT_DESCRIPTOR pImports = reinterpret_cast<PIMAGE_IMPORT_DESCRIPTOR>(instance + ntHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+        DWORD dwProtect[2];
+
+        for (; pImports->Name != 0; pImports++)
+        {
+            if (_stricmp(reinterpret_cast<const char*>(instance + pImports->Name), dll_name.data()) == 0)
+            {
+                if (pImports->OriginalFirstThunk != 0)
+                {
+                    const PIMAGE_THUNK_DATA pThunk = reinterpret_cast<PIMAGE_THUNK_DATA>(instance + pImports->OriginalFirstThunk);
+
+                    for (ptrdiff_t j = 0; pThunk[j].u1.AddressOfData != 0; j++)
+                    {
+                        auto pAddress = reinterpret_cast<void**>(instance + pImports->FirstThunk) + j;
+                        if (!pAddress) continue;
+                        VirtualProtect(pAddress, sizeof(pAddress), PAGE_EXECUTE_READWRITE, &dwProtect[0]);
+                        ([&]
+                        {
+                            auto name = std::string_view(std::get<0>(inputs));
+                            auto num = std::string("-1");
+                            if (name.contains("@")) {
+                                num = name.substr(name.find_last_of("@") + 1);
+                                name = name.substr(0, name.find_last_of("@"));
+                            }
+
+                            if (pThunk[j].u1.Ordinal & IMAGE_ORDINAL_FLAG)
+                            {
+                                try
+                                {
+                                    if (IMAGE_ORDINAL(pThunk[j].u1.Ordinal) == std::stoi(num.data()))
+                                    {
+                                        originalPtrs[std::get<0>(inputs)] = std::async(std::launch::deferred, [&]() -> void* { return *pAddress; });
+                                        originalPtrs[std::get<0>(inputs)].wait();
+                                        *pAddress = std::get<1>(inputs);
+                                    }
+                                }
+                                catch (...) {}
+                            }
+                            else if ((*pAddress && *pAddress == (void*)GetProcAddress(GetModuleHandleA(dll_name.data()), name.data())) ||
+                            (strcmp(reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(instance + pThunk[j].u1.AddressOfData)->Name, name.data()) == 0))
+                            {
+                                originalPtrs[std::get<0>(inputs)] = std::async(std::launch::deferred, [&]() -> void* { return *pAddress; });
+                                originalPtrs[std::get<0>(inputs)].wait();
+                                *pAddress = std::get<1>(inputs);
+                            }
+                        } (), ...);
+                        VirtualProtect(pAddress, sizeof(pAddress), dwProtect[0], &dwProtect[1]);
+                    }
+                }
+                else
+                {
+                    auto pFunctions = reinterpret_cast<void**>(instance + pImports->FirstThunk);
+
+                    for (ptrdiff_t j = 0; pFunctions[j] != nullptr; j++)
+                    {
+                        auto pAddress = reinterpret_cast<void**>(pFunctions[j]);
+                        VirtualProtect(pAddress, sizeof(pAddress), PAGE_EXECUTE_READWRITE, &dwProtect[0]);
+                        ([&]
+                        {
+                            if (*pAddress && *pAddress == (void*)GetProcAddress(GetModuleHandleA(dll_name.data()), std::get<0>(inputs)))
+                            {
+                                originalPtrs[std::get<0>(inputs)] = std::async(std::launch::deferred, [&]() -> void* { return *pAddress; });
+                                originalPtrs[std::get<0>(inputs)].wait();
+                                *pAddress = std::get<1>(inputs);
+                            }
+                        } (), ...);
+                        VirtualProtect(pAddress, sizeof(pAddress), dwProtect[0], &dwProtect[1]);
+                    }
+                }
+            }
+        }
+
+        if (originalPtrs.empty())
+        {
+            PIMAGE_DELAYLOAD_DESCRIPTOR pDelayed = reinterpret_cast<PIMAGE_DELAYLOAD_DESCRIPTOR>(instance + ntHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT].VirtualAddress);
+            if (pDelayed)
+            {
+                for (; pDelayed->DllNameRVA != 0; pDelayed++)
+                {
+                    if (_stricmp(reinterpret_cast<const char*>(instance + pDelayed->DllNameRVA), dll_name.data()) == 0)
+                    {
+                        if (pDelayed->ImportAddressTableRVA != 0)
+                        {
+                            const PIMAGE_THUNK_DATA pThunk = reinterpret_cast<PIMAGE_THUNK_DATA>(instance + pDelayed->ImportNameTableRVA);
+                            const PIMAGE_THUNK_DATA pFThunk = reinterpret_cast<PIMAGE_THUNK_DATA>(instance + pDelayed->ImportAddressTableRVA);
+
+                            for (ptrdiff_t j = 0; pThunk[j].u1.AddressOfData != 0; j++)
+                            {
+                                auto pAddress = reinterpret_cast<void**>(pFThunk[j].u1.Function);
+                                if (!pAddress) continue;
+                                if (pThunk[j].u1.Ordinal & IMAGE_ORDINAL_FLAG)
+                                    pAddress = *reinterpret_cast<void***>(pFThunk[j].u1.Function + 1); // mov     eax, offset *
+
+                                VirtualProtect(pAddress, sizeof(pAddress), PAGE_EXECUTE_READWRITE, &dwProtect[0]);
+                                ([&]
+                                {
+                                    auto name = std::string_view(std::get<0>(inputs));
+                                    auto num = std::string("-1");
+                                    if (name.contains("@")) {
+                                        num = name.substr(name.find_last_of("@") + 1);
+                                        name = name.substr(0, name.find_last_of("@"));
+                                    }
+
+                                    if (pThunk[j].u1.Ordinal & IMAGE_ORDINAL_FLAG)
+                                    {
+                                        try
+                                        {
+                                            if (IMAGE_ORDINAL(pThunk[j].u1.Ordinal) == std::stoi(num.data()))
+                                            {
+                                                originalPtrs[std::get<0>(inputs)] = std::async(std::launch::async,
+                                                [](void** pAddress, void* value, PVOID instance) -> void*
+                                                {
+                                                    DWORD dwProtect[2];
+                                                    VirtualProtect(pAddress, sizeof(pAddress), PAGE_EXECUTE_READWRITE, &dwProtect[0]);
+                                                    MEMORY_BASIC_INFORMATION mbi;
+                                                    mbi.AllocationBase = instance;
+                                                    do
+                                                    {
+                                                        VirtualQuery(*pAddress, &mbi, sizeof(MEMORY_BASIC_INFORMATION));
+                                                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                                                    } while (mbi.AllocationBase == instance);
+                                                    auto r = *pAddress;
+                                                    *pAddress = value;
+                                                    VirtualProtect(pAddress, sizeof(pAddress), dwProtect[0], &dwProtect[1]);
+                                                    return r;
+                                                }, pAddress, std::get<1>(inputs), (PVOID)instance);
+                                            }
+                                        }
+                                        catch (...) {}
+                                    }
+                                    else if ((*pAddress && *pAddress == (void*)GetProcAddress(GetModuleHandleA(dll_name.data()), name.data())) ||
+                                    (strcmp(reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(instance + pThunk[j].u1.AddressOfData)->Name, name.data()) == 0))
+                                    {
+                                        originalPtrs[std::get<0>(inputs)] = std::async(std::launch::async,
+                                        [](void** pAddress, void* value, PVOID instance) -> void*
+                                        {
+                                            DWORD dwProtect[2];
+                                            VirtualProtect(pAddress, sizeof(pAddress), PAGE_EXECUTE_READWRITE, &dwProtect[0]);
+                                            MEMORY_BASIC_INFORMATION mbi;
+                                            mbi.AllocationBase = instance;
+                                            do
+                                            {
+                                                VirtualQuery(*pAddress, &mbi, sizeof(MEMORY_BASIC_INFORMATION));
+                                                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                                            } while (mbi.AllocationBase == instance);
+                                            auto r = *pAddress;
+                                            *pAddress = value;
+                                            VirtualProtect(pAddress, sizeof(pAddress), dwProtect[0], &dwProtect[1]);
+                                            return r;
+                                        }, pAddress, std::get<1>(inputs), (PVOID)instance);
+                                    }
+                                } (), ...);
+                                VirtualProtect(pAddress, sizeof(pAddress), dwProtect[0], &dwProtect[1]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (originalPtrs.empty()) // e.g. re5dx9.exe steam
+        {
+            static auto getSection = [](const PIMAGE_NT_HEADERS nt_headers, unsigned section) -> PIMAGE_SECTION_HEADER
+            {
+                return reinterpret_cast<PIMAGE_SECTION_HEADER>(
+                    (UCHAR*)nt_headers->OptionalHeader.DataDirectory +
+                    nt_headers->OptionalHeader.NumberOfRvaAndSizes * sizeof(IMAGE_DATA_DIRECTORY) +
+                    section * sizeof(IMAGE_SECTION_HEADER));
+            };
+
+            for (auto i = 0; i < ntHeader->FileHeader.NumberOfSections; i++)
+            {
+                auto sec = getSection(ntHeader, i);
+                auto pFunctions = reinterpret_cast<void**>(instance + max(sec->PointerToRawData, sec->VirtualAddress));
+
+                for (ptrdiff_t j = 0; j < 300; j++)
+                {
+                    auto pAddress = reinterpret_cast<void**>(&pFunctions[j]);
+                    VirtualProtect(pAddress, sizeof(pAddress), PAGE_EXECUTE_READWRITE, &dwProtect[0]);
+                    ([&]
+                    {
+                        auto name = std::string_view(std::get<0>(inputs));
+                        auto num = std::string("-1");
+                        if (name.contains("@")) {
+                            num = name.substr(name.find_last_of("@") + 1);
+                            name = name.substr(0, name.find_last_of("@"));
+                        }
+
+                        if (*pAddress && *pAddress == (void*)GetProcAddress(GetModuleHandleA(dll_name.data()), name.data()))
+                        {
+                            originalPtrs[std::get<0>(inputs)] = std::async(std::launch::deferred, [&]() -> void* { return *pAddress; });
+                            originalPtrs[std::get<0>(inputs)].wait();
+                            *pAddress = std::get<1>(inputs);
+                        }
+                    } (), ...);
+                    VirtualProtect(pAddress, sizeof(pAddress), dwProtect[0], &dwProtect[1]);
+                }
+
+                if (!originalPtrs.empty())
+                    return originalPtrs;
+            }
+        }
+
+        return originalPtrs;
+    }
+};
+
+template <typename T, typename PtrSize = uintptr_t>
+std::optional<T> PtrWalkthrough(auto addr, std::convertible_to<ptrdiff_t> auto&& ...offsets)
+{
+    auto list = std::vector<ptrdiff_t>{ offsets... };
+    auto last = list.back(); list.pop_back();
+    auto a = injector::ReadMemory<PtrSize>(addr, true);
+    if (a)
+    {
+        for (auto v : list)
+        {
+            auto ptr = injector::ReadMemory<PtrSize>(a + v, true);
+            if (ptr)
+                a = ptr;
+            else
+            {
+                a = 0;
+                break;
+            }
+        }
+
+        if (a)
+            return injector::ReadMemory<T>(a + last, true);
+    }
+    return std::nullopt;
+};
+
+class WFP
+{
+public:
+    template<typename... Args>
+    class Event : public std::function<void(Args...)>
+    {
+    public:
+        using std::function<void(Args...)>::function;
+
+    private:
+        std::vector<std::function<void(Args...)>> handlers;
+
+    public:
+        void operator+=(std::function<void(Args...)>&& handler)
+        {
+            handlers.push_back(handler);
+        }
+
+        void executeAll(Args... args) const
+        {
+            if (!handlers.empty())
+            {
+                for (auto& handler : handlers)
+                {
+                    handler(args...);
+                }
+            }
+        }
+
+        std::reference_wrapper<std::vector<std::future<void>>> executeAllAsync(Args... args) const
+        {
+            static std::vector<std::future<void>> pendingFutures;
+            if (!handlers.empty())
+            {
+                for (auto& handler : handlers)
+                {
+                    pendingFutures.push_back(std::async(std::launch::async, handler, args...));
+                }
+            }
+            return std::ref(pendingFutures);
+        }
+    };
+
+public:
+    static Event<>& onInitEvent() {
+        static Event<> InitEvent;
+        return InitEvent;
+    }
+    static Event<>& onInitEventAsync() {
+        static Event<> InitEventAsync;
+        return InitEventAsync;
+    }
+    static Event<>& onAfterUALRestoredIATEvent() {
+        static Event<> AfterUALRestoredIATEvent;
+        return AfterUALRestoredIATEvent;
+    }
+    static Event<>& onShutdownEvent() {
+        static Event<> ShutdownEvent;
+        return ShutdownEvent;
+    }
+    static Event<>& onGameInitEvent() {
+        static Event<> GameInitEvent;
+        return GameInitEvent;
+    }
+    static Event<>& onGameProcessEvent() {
+        static Event<> GameProcessEvent;
+        return GameProcessEvent;
+    }
+};
+
+namespace injector
+{
+    inline bool UnprotectMemory(memory_pointer_tr addr, size_t size)
+    {
+        DWORD out_oldprotect = 0;
+        return VirtualProtect(addr.get(), size, PAGE_EXECUTE_READWRITE, &out_oldprotect) != 0;
+    }
+
+#ifdef _WIN64
+    inline injector::memory_pointer_raw MakeCALLTrampoline(injector::memory_pointer_tr at, injector::memory_pointer_raw dest, bool vp = true)
+    {
+        auto trampoline = Trampoline::MakeTrampoline((void*)at.as_int());
+        return MakeCALL(at, trampoline->Jump(dest));
+    }
+#endif
 };

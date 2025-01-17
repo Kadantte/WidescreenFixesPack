@@ -9,14 +9,8 @@ if errorlevel 1 (
 ) else (
    SET filepath=%%F
    SET dll=!filepath:.ual=.dll!
-   ECHO !dll! 	
-   copy "..\..\Ultimate-ASI-Loader\bin\Win32\Release\dinput8.dll" !dll!
-   REM SET "mu=%%~dpF\scripts\"
-   REM SET "mu2=%%~dpF\plugins\"
-   REM SET "mu3=%%~dpF\"
-   REM SET "mu4=modupdater.asi"
-   REM ECHO !mu!
-   REM IF EXIST !mu! (copy "..\..\modupdater\bin\Release\modupdater.asi" !mu!!mu4!) ELSE IF EXIST !mu2! (copy "..\..\modupdater\bin\Release\modupdater.asi" !mu2!!mu4!) ELSE (copy "..\..\modupdater\bin\Release\modupdater.asi" !mu3!!mu4!)
+   ECHO !dll!
+   7za e -so "..\Ultimate-ASI-Loader.zip" *.dll -r > !dll!
 )
 )
 
@@ -27,13 +21,9 @@ if errorlevel 1 (
 ) else (
    SET filepath=%%F
    SET dll=!filepath:.x64ual=.dll!
-   ECHO !dll! 	
+   ECHO !dll!
    copy "..\..\Ultimate-ASI-Loader\bin\x64\Release\dinput8.dll" !dll!
-   REM SET "mu=%%~dpF\scripts\"
-   REM SET "mu2=%%~dpF\plugins\"
-   REM SET "mu3=modupdater.asi"
-   REM ECHO !mu!
-   REM IF EXIST !mu! (copy "..\..\modupdater\bin\Release\modupdater.asi" !mu!!mu3!) ELSE (copy "..\..\modupdater\bin\Release\modupdater.asi" !mu2!!mu3!)
+   7za e -so "..\Ultimate-ASI-Loader_x64.zip" *.dll -r > !dll!
 )
 )
 
@@ -47,16 +37,29 @@ if errorlevel 1 (
         ) else (
         SET filepath=%%F
         SET dll=!filepath:.wrapper=.dll!
-        ECHO !dll! 	
-        copy "..\..\d3d8-wrapper\data\d3d8.dll" !dll!
+        ECHO !dll!
+        7za e -so "..\d3d8.zip" *.dll -r > !dll!
 )
 ) else (
    SET filepath=%%F
    SET dll=!filepath:.wrapper=.dll!
-   ECHO !dll! 	
-   copy "..\..\d3d9-wrapper\data\d3d9.dll" !dll!
+   ECHO !dll!
+   7za e -so "..\d3d9.zip" *.dll -r > !dll!
 )
 )
+
+rem Manhunt Widescreen Fix
+copy /b/v/y "..\source\Manhunt.WidescreenFix\bin\Manhunt.WidescreenFix.ini" ".\Manhunt.WidescreenFix\scripts\Manhunt.WidescreenFix.ini"
+
+rem dgVoodoo
+7za e -so "..\dgVoodoo2.zip" "MS\x86\DDraw.dll" > ".\KnightRider.WidescreenFix\DDraw.dll"
+7za e -so "..\dgVoodoo2.zip" "MS\x86\D3DImm.dll" > ".\KnightRider.WidescreenFix\D3DImm.dll"
+
+7za e -so "..\dgVoodoo2.zip" "MS\x86\DDraw.dll" > ".\KnightRider2.WidescreenFix\DDraw.dll"
+7za e -so "..\dgVoodoo2.zip" "MS\x86\D3DImm.dll" > ".\KnightRider2.WidescreenFix\D3DImm.dll"
+
+7za e -so "..\dgVoodoo2.zip" "MS\x86\D3D8.dll" > ".\SplinterCell.WidescreenFix\system\d3d8.dll"
+7za e -so "..\dgVoodoo2.zip" "MS\x86\D3D8.dll" > ".\SplinterCellPandoraTomorrow.WidescreenFix\offline\system\d3d8.dll"
 
 rem Creating archives
 
@@ -67,8 +70,9 @@ FOR /D /r %%G in ("*PPSSPP*") DO (
 )
 
 rem Additional texture archives
-7za a "GTALCS.PPSSPP.ImVehLM\memstick\PSP\TEXTURES\ULUS10041\textures.zip" -mx=0 "..\textures\GTALCS\*"
-7za a "GTAVCS.PPSSPP.ImVehLM\memstick\PSP\TEXTURES\ULUS10160\textures.zip" -mx=0 "..\textures\GTAVCS\*"
+7za a "GTALCS.PPSSPP.ImVehLM\memstick\PSP\TEXTURES\ULUS10041\textures.zip" -mx=0 "..\textures\GTALCS\*" -x^^!buildps2.bat -x^^!texture_dump_alpha_scaler.py
+7za a "GTAVCS.PPSSPP.ImVehLM\memstick\PSP\TEXTURES\ULUS10160\textures.zip" -mx=0 "..\textures\GTAVCS\*" -x^^!buildps2.bat -x^^!texture_dump_alpha_scaler.py
+7za a "GTAVCS.PPSSPP.GamepadIcons\memstick\PSP\TEXTURES\ULUS10160\textures.zip" -mx=0 "..\textures\GTAVCS\*" -x^^!buildps2.bat -x^^!texture_dump_alpha_scaler.py
 
 FOR /d %%X IN (*) DO (
 7za a -tzip "Archives\%%X.zip" ".\%%X\*" -r -xr^^!Archives -x^^!*.pdb -x^^!*.db -x^^!*.ipdb -x^^!*.iobj -x^^!*.tmp -x^^!*.iobj -x^^!*.ual -x^^!*.x64ual -x^^!*.iobj -x^^!*.wrapper -x^^!*.lib -x^^!*.exp -x^^!*.ilk -x^^!*.map -x^^!*.gitkeep

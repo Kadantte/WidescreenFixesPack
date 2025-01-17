@@ -1,6 +1,10 @@
 #include "stdafx.h"
+#include "LEDEffects.h"
 #include <d3d9.h>
+#include <d3dx9.h>
+#pragma comment(lib, "d3dx9.lib")
 #include <vector>
+#include <xinput.h>
 
 constexpr auto defaultAspectRatio = 16.0f / 9.0f;
 float fFOVFactor = 1.0f;
@@ -143,6 +147,10 @@ enum GUI
     VirtualScreen = 0x141AC10
 };
 
+static IDirect3DVertexShader9* g_screenVertexShader = nullptr;
+static IDirect3DPixelShader9* g_wmvYuvDecodePixelShader = nullptr;
+static IDirect3DVertexShader9* g_myScreenVertexShader = nullptr;
+
 bool IsSplitScreenActive()
 {
     auto ptr = *(uint32_t*)0x157AE00;
@@ -240,7 +248,7 @@ void __fastcall sub_96C410(int _this, int edx, int a2, int a3)
         v9 = v10;
 
     if (IsSplitScreenActive())
-        a2 += (int32_t)(720.0f * GetAspectRatio()) - (1280.0f / (1280.0f / GetNativeSplitScreenResX()));
+        a2 += (int32_t)((720.0f * GetAspectRatio()) - (1280.0f / (1280.0f / GetNativeSplitScreenResX())));
     else
         a2 += (int32_t)(((720.0f * GetAspectRatio()) - 1280.0f) / 2.0f);
 
@@ -252,7 +260,8 @@ enum
 {
     RESCALE = 0xAAAAEEEE,
     STRETCH = 0xBBBBFFFF,
-    OFFSET = 0xCCCCDDDD
+    OFFSET = 0xCCCCDDDD,
+    SUBTITLES = 0xDDDDDDDD,
 };
 
 void __fastcall sub_E18040(int _this, int edx, int a2)
@@ -347,58 +356,59 @@ void __fastcall sub_E18040(int _this, int edx, int a2)
     *((uint32_t*)v2 + 81) |= 1u;
     if (v13)
     {
-        v14 = 2.0 / (float)(v28 - v19);
-        v15 = -2.0 / (float)(v21 - v29);
+        v14 = 2.0f / (float)(v28 - v19);
+        v15 = -2.0f / (float)(v21 - v29);
         v13[0] = v14 * v4;
         v13[1] = v15 * v5;
-        v13[2] = (float)(v14 * v6) - 1.0;
-        v13[3] = (float)(v15 * v7) + 1.0;
+        v13[2] = (float)(v14 * v6) - 1.0f;
+        v13[3] = (float)(v15 * v7) + 1.0f;
         *((uint32_t*)v2 + 19) &= ~2u;
 
         switch (edx)
         {
+        case SUBTITLES:
         case RESCALE:
         {
             if (IsSplitScreenActive())
             {
                 if (v21 == GetCurrentSplitScreenResY() || v21 == (GetCurrentSplitScreenResY() + 1))
                 {
-                    v14 = 2.0 / (float)(v28 - v19);
-                    v15 = -2.0 / (float)(v21 - v29);
-                    v13[0] = v14 * v4;
+                    v14 = 2.0f / (float)(v28 - v19);
+                    v15 = -2.0f / (float)(v21 - v29);
+                    v13[0] = v14 * v4 * ((edx == SUBTITLES) ? (1.0f / GetDiff()) : 1.0f);
                     v13[1] = v15 * v5;
                     v13[2] = (float)(v14 * v6) - (1.0f / GetDiff());
-                    v13[3] = (float)(v15 * v7) + 1.0;
+                    v13[3] = (float)(v15 * v7) + 1.0f;
                 }
                 else if (v21 == GetResY())
                 {
-                    v14 = 2.0 / (float)(v28 - v19);
-                    v15 = -2.0 / (float)(v21 - v29);
-                    v13[0] = v14 * v4;
+                    v14 = 2.0f / (float)(v28 - v19);
+                    v15 = -2.0f / (float)(v21 - v29);
+                    v13[0] = v14 * v4 * ((edx == SUBTITLES) ? (1.0f / GetDiff()) : 1.0f);
                     v13[1] = v15 * v5;
                     v13[2] = (float)(v14 * v6) - (1.0f / (GetAspectRatio() / defaultAspectRatio));
-                    v13[3] = (float)(v15 * v7) + 1.0;
+                    v13[3] = (float)(v15 * v7) + 1.0f;
                 }
             }
             else
             {
-                v14 = 2.0 / (float)(v28 - v19);
-                v15 = -2.0 / (float)(v21 - v29);
-                v13[0] = v14 * v4;
+                v14 = 2.0f / (float)(v28 - v19);
+                v15 = -2.0f / (float)(v21 - v29);
+                v13[0] = v14 * v4 * ((edx == SUBTITLES) ? (1.0f / GetDiff()) : 1.0f);
                 v13[1] = v15 * v5;
                 v13[2] = (float)(v14 * v6) - (1.0f / GetDiff());
-                v13[3] = (float)(v15 * v7) + 1.0;
+                v13[3] = (float)(v15 * v7) + 1.0f;
             }
         }
         break;
         case STRETCH:
         {
-            v14 = (2.0 * GetDiff()) / (float)(v28 - v19);
-            v15 = -2.0 / (float)(v21 - v29);
+            v14 = (2.0f * GetDiff()) / (float)(v28 - v19);
+            v15 = -2.0f / (float)(v21 - v29);
             v13[0] = v14 * v4;
             v13[1] = v15 * v5;
             v13[2] = -1.0f; //(float)(v14 * v6) - fDiffInv;
-            v13[3] = (float)(v15 * v7) + 1.0;
+            v13[3] = (float)(v15 * v7) + 1.0f;
         }
         break;
         case OFFSET:
@@ -407,33 +417,33 @@ void __fastcall sub_E18040(int _this, int edx, int a2)
             {
                 if (v21 == GetCurrentSplitScreenResY() || v21 == (GetCurrentSplitScreenResY() + 1))
                 {
-                    v14 = 2.0 / (float)(v28 - v19);
-                    v15 = -2.0 / (float)(v21 - v29);
+                    v14 = 2.0f / (float)(v28 - v19);
+                    v15 = -2.0f / (float)(v21 - v29);
                     v13[0] = v14 * v4;
                     v13[1] = v15 * v5;
                     v13[2] = (float)(v14 * v6) - (1.0f / GetDiff());
-                    v13[3] = (float)(v15 * v7) + 1.0;
+                    v13[3] = (float)(v15 * v7) + 1.0f;
                 }
                 else if (v21 == GetResY())
                 {
-                    v14 = 2.0 / (float)(v28 - v19);
-                    v15 = -2.0 / (float)(v21 - v29);
+                    v14 = 2.0f / (float)(v28 - v19);
+                    v15 = -2.0f / (float)(v21 - v29);
                     v13[0] = v14 * v4;
                     v13[1] = v15 * v5;
                     v13[2] = (float)(v14 * v6) - (1.0f / (GetAspectRatio() / defaultAspectRatio));
-                    v13[3] = (float)(v15 * v7) + 1.0;
+                    v13[3] = (float)(v15 * v7) + 1.0f;
                 }
             }
             else
             {
                 if (v21 == GetResY())
                 {
-                    v14 = 2.0 / (float)(v28 - v19);
-                    v15 = -2.0 / (float)(v21 - v29);
+                    v14 = 2.0f / (float)(v28 - v19);
+                    v15 = -2.0f / (float)(v21 - v29);
                     v13[0] = v14 * v4;
                     v13[1] = v15 * v5;
                     v13[2] = (float)(v14 * v6) - (1.0f / GetDiff());
-                    v13[3] = (float)(v15 * v7) + 1.0;
+                    v13[3] = (float)(v15 * v7) + 1.0f;
                 }
             }
         }
@@ -466,7 +476,7 @@ void __fastcall sub_E18040(int _this, int edx, int a2)
     {
         goto LABEL_18;
     }
-    v18 = v20 + 0.25;
+    v18 = v20 + 0.25f;
 LABEL_19:
     v16 = a2;
 LABEL_20:
@@ -489,6 +499,11 @@ void __fastcall sub_E18040_nop(int _this, int edx, int a2)
 
 void __fastcall sub_E18040_rescale(int _this, int edx, int a2)
 {
+    auto uBioGUISubtitles = (const char*)(*(uintptr_t*)_this + 0x1B8);
+
+    if (!IsBadReadPtr(uBioGUISubtitles, sizeof(char*)) && std::string_view(uBioGUISubtitles) == "uBioGUISubtitles")
+        return sub_E18040(_this, SUBTITLES, a2);
+
     return sub_E18040(_this, RESCALE, a2);
 }
 
@@ -510,13 +525,14 @@ void __fastcall sub_B82960(void* _this, void* edx, float a2, float a3, float a4,
     return injector::fastcall<void(void*, void*, float, float, float, float)>::call(0xB82960, _this, edx, a2, a3, a4, a5);
 }
 
-IDirect3DVertexShader9* shader_4F0EE939 = nullptr;
+//IDirect3DVertexShader9* shader_4F0EE939 = nullptr;
 IDirect3DVertexShader9* __stdcall CreateVertexShaderHook(const DWORD** a1)
 {
     if (!a1)
         return nullptr;
 
     auto pDevice = (IDirect3DDevice9*)*((uint32_t*)*(uint32_t*)0x15E0388 + 0x26);
+
     IDirect3DVertexShader9* pShader = nullptr;
     pDevice->CreateVertexShader(a1[2], &pShader);
 
@@ -530,12 +546,145 @@ IDirect3DVertexShader9* __stdcall CreateVertexShaderHook(const DWORD** a1)
 
         pShader->GetFunction(pbFunc.data(), &len);
 
-        uint32_t crc32(uint32_t crc, const void* buf, size_t size);
         auto crc = crc32(0, pbFunc.data(), len);
 
         // various overlays (low health, waiting for partner, pause text, maybe more)
         if (crc == 0x4F0EE939)
-            shader_4F0EE939 = pShader;
+        {
+            const char* shader_text =
+                "vs_3_0\n"
+                "def c0, 32768, -128, 0.00390625, 0.25\n"
+                "def c4, 1, 0, -128, 4\n"
+                "def c5, 0.000244140654, 0.5, 6.28318548, -3.14159274\n"
+                "def c6, 2, -1, 1, 9.99999997e-007\n"
+                "def c7, 1.8, 0.28125, 0, 0\n" // 1.8 instead of 1.6 to cover the gaps in ultra wide
+                "dcl_position v0\n"
+                "dcl_normal v1\n"
+                "dcl_tangent v2\n"
+                "dcl_binormal v3\n"
+                "dcl_texcoord v4\n"
+                "dcl_position o0\n"
+                "dcl_texcoord o1\n"
+                "dcl_texcoord1 o2\n"
+                "mov r0.x, v3.x\n"
+                "add o0.z, r0.x, v0.z\n"
+                "add r0.xyz, c0.x, v3.zwyw\n"
+                "mul r0.xz, r0, c0.z\n"
+                "mad r0.y, r0.y, c5.x, c5.y\n"
+                "frc r0.y, r0.y\n"
+                "mad r0.y, r0.y, c5.z, c5.w\n"
+                "sincos r1.xy, r0.y\n"
+                "mul o1.xyz, r0.z, v1\n"
+                "mul o2.xy, c3, v2\n"
+                "add r0.yz, c0.y, v4.xxyw\n"
+                "mul r0.xy, r0.x, r0.yzzw\n"
+                "mad r0.zw, v4.z, c4.xyxy, c4\n"
+                "mul r0.xy, r0.zwzw, r0\n"
+                "mul r0.x, r0.x, c0.w\n"
+                "mul r0.yz, r1.xyxw, r0.y\n"
+                "mad r2.x, r0.x, r1.x, -r0.y\n"
+                "mad r2.y, r0.x, r1.y, r0.z\n"
+                "mov r0.xy, v0\n"
+                "mul r0.xy, r0, c2\n"
+                "mad r0.xy, r0, c6.x, c6.yzzw\n"
+                "slt r0.z, v1.w, c6.w\n"
+                "add r0.z, -r0.z, c4.x\n"
+                "rcp r10.x, c2.x\n"
+                "mul r10.x, c2.w, r10.x\n"
+                "mul r10.x, r10.x, c7.y\n"
+                "mul r0.x, r0.x, r10.x\n"
+                "mul o0.x, r0.x, c7.x\n"
+                "mad o0.y, c1.y, r0.z, r0.y\n"
+                "mov o0.w, r0.z\n"
+                "mov o1.w, v1.w\n"
+                "mov o2.zw, c4.y\n";
+
+            LPD3DXBUFFER pCode;
+            LPD3DXBUFFER pErrorMsgs;
+            LPDWORD pShaderData;
+            auto result = D3DXAssembleShader(shader_text, strlen(shader_text), NULL, NULL, 0, &pCode, &pErrorMsgs);
+            if (SUCCEEDED(result))
+            {
+                pShaderData = (DWORD*)pCode->GetBufferPointer();
+                IDirect3DVertexShader9* shader = nullptr;
+                if (pDevice->CreateVertexShader(pShaderData, &shader) == D3D_OK)
+                {
+                    pShader->Release();
+                    return shader;
+                }
+            }
+        }
+        else if (crc == 0x1287841D)
+        {
+            g_screenVertexShader = pShader;
+
+            // inject additional, alternative screenspace shader for FMV fixups
+            constexpr auto src = R"(
+            struct VS_INPUT {
+                float4 position : POSITION;
+            };
+            
+            struct VS_OUTPUT {
+                float4 position : POSITION;
+                float4 uv : TEXCOORD;
+            };
+            
+            float2 fScreenHalfPixelOffset : register(c1);
+            float fHorizontalAspectScale : register(c20);
+            
+            VS_OUTPUT main(VS_INPUT input)
+            {
+                VS_OUTPUT output;
+            
+                output.position = float4(
+                  -fScreenHalfPixelOffset.x + input.position.x * fHorizontalAspectScale,
+                  fScreenHalfPixelOffset.y + input.position.y,
+                  0.0,
+                  1.0);
+                output.uv = float4(
+                  1.0 * input.position.z,
+                  1.0 * input.position.w,
+                  0.0, 0.0
+                );
+            
+                return output;
+            })";
+
+            LPD3DXBUFFER code;
+            if (SUCCEEDED(D3DXCompileShader(src, strlen(src), nullptr, nullptr, "main", "vs_3_0", NULL, &code, nullptr, nullptr)))
+            {
+                pDevice->CreateVertexShader(reinterpret_cast<const DWORD*>(code->GetBufferPointer()), &g_myScreenVertexShader);
+            }
+        }
+    }
+
+    return pShader;
+}
+
+IDirect3DPixelShader9* __stdcall CreatePixelShaderHook(const DWORD** a1)
+{
+    if (!a1)
+        return nullptr;
+
+    auto pDevice = (IDirect3DDevice9*)*((uint32_t*)*(uint32_t*)0x15E0388 + 0x26);
+
+    IDirect3DPixelShader9* pShader = nullptr;
+    pDevice->CreatePixelShader(a1[2], &pShader);
+
+    if (pShader != nullptr)
+    {
+        UINT len;
+        pShader->GetFunction(nullptr, &len);
+        std::vector<uint8_t> pbFunc(len, 0);
+
+        pShader->GetFunction(pbFunc.data(), &len);
+
+        auto crc = crc32(0, pbFunc.data(), len);
+
+        if (crc == 0x9D190FC7)
+        {
+            g_wmvYuvDecodePixelShader = pShader;
+        }
     }
 
     return pShader;
@@ -559,6 +708,81 @@ void __stdcall SplitScreenSetupBottom(void* a1, int32_t* a2)
     return injector::stdcall<void(void*, int32_t*)>::call(0x4AC310, a1, a2);
 }
 
+bool bDisableCreateQuery = false;
+void __fastcall gpuCommandBufferSync(IDirect3DDevice9** m_ppD3DDevice, void* edx)
+{
+    if (bDisableCreateQuery)
+        return;
+
+    IDirect3DQuery9* pEventQuery = NULL;
+    m_ppD3DDevice[38]->CreateQuery(D3DQUERYTYPE_EVENT, &pEventQuery);
+
+    if (pEventQuery)
+    {
+        pEventQuery->Issue(D3DISSUE_END);
+        while (pEventQuery->GetData(NULL, 0, D3DGETDATA_FLUSH) == S_FALSE)
+            Sleep(0);
+        pEventQuery->Release();
+    }
+}
+
+bool bNeedsAutoclick = false;
+injector::hook_back<const char* (__fastcall*)(void*, void*, int, int)> hb_954B40;
+const char* __fastcall sub_954B40(void* _this, void* a2, int a3, int a4)
+{
+    static constexpr auto RestartStr = "Restart game from your last checkpoint.";
+    static constexpr auto LoadSuccessful = "Load successful.";
+    static constexpr auto ThisGameReq = "This game has an autosave feature.\r\nDo not turn off the power when the above icon is displayed.";
+
+    auto ret = hb_954B40.fun(_this, a2, a3, a4);
+
+    if (ret)
+    {
+        auto s = std::string_view(ret);
+
+        if (s == RestartStr || s == LoadSuccessful || s == ThisGameReq)
+        {
+            bNeedsAutoclick = true;
+        }
+    }
+
+    return ret;
+}
+
+std::future<void*> pXInputGetState;
+injector::hook_back<DWORD(WINAPI*)(DWORD, XINPUT_STATE*)> hbXInputGetStateHook;
+DWORD WINAPI XInputGetStateHook(DWORD dwUserIndex, XINPUT_STATE* pState)
+{
+    if (!hbXInputGetStateHook.fun)
+        hbXInputGetStateHook.fun = (decltype(hbXInputGetStateHook.fun))pXInputGetState.get();
+
+    auto ret = hbXInputGetStateHook.fun(dwUserIndex, pState);
+
+    if (bNeedsAutoclick)
+    {
+        pState->Gamepad.wButtons = XINPUT_GAMEPAD_A;
+
+        static auto frames = 0;
+        if (frames % 10) {
+            pState->Gamepad.wButtons = 0x0000;
+
+            if (frames >= 2000) {
+                frames = 0;
+                bNeedsAutoclick = false;
+            }
+        }
+        frames++;
+    }
+
+    return ret;
+}
+
+int nForceLogo = 0;
+int sub_984240()
+{
+    return nForceLogo - 1;
+}
+
 void Init()
 {
     CIniReader iniReader("");
@@ -570,6 +794,9 @@ void Init()
     auto bDisableGUICommandFar = iniReader.ReadInteger("MAIN", "DisableGUICommandFar", 0) != 0;
     fFOVFactor= iniReader.ReadFloat("MAIN", "FOVFactor", 1.0f);
     if (fFOVFactor <= 0.0f) fFOVFactor = 1.0f;
+    bDisableCreateQuery = iniReader.ReadInteger("MAIN", "DisableCreateQuery", 0) != 0;
+    auto bAutoclicker = iniReader.ReadInteger("MAIN", "Autoclicker", 0) != 0;
+    nForceLogo = std::clamp(iniReader.ReadInteger("MAIN", "ForceLogo", 0), 0, 4);
     
     if (bSkipIntro)
     {
@@ -613,7 +840,28 @@ void Init()
     });
 
     // movies fix for ultra wide
-    // ?
+    {
+        static auto DrawPrimitiveHook = safetyhook::create_mid(0xCC8788, [](SafetyHookContext& regs)
+        {
+            auto g_device = (IDirect3DDevice9*)regs.edi;
+
+            // switch to a x-scaling vertex shader if drawing FMVs
+            IDirect3DPixelShader9* frag;
+            g_device->GetPixelShader(&frag);
+            if (frag != g_wmvYuvDecodePixelShader)
+                return;
+
+            IDirect3DVertexShader9* vert;
+            g_device->GetVertexShader(&vert);
+            if (vert != g_screenVertexShader)
+                return;
+
+            g_device->SetVertexShader(g_myScreenVertexShader);
+            const float horzScaleFactor = (defaultAspectRatio / GetAspectRatio());
+            const std::array<float, 4> shaderConsts = { horzScaleFactor, 0.0f, 0.0f, 0.0f };
+            g_device->SetVertexShaderConstantF(20, shaderConsts.data(), 1);
+        });
+    }
 
     // split screen windows dimensions
     injector::MakeCALL(0x4AE6E8, SplitScreenSetupTop, true);
@@ -663,24 +911,25 @@ void Init()
 
     //disable shader overlays (don't scale to fullscreen)
     {
-        injector::MakeCALL(0xFFB9E2, CreateVertexShaderHook, true);
+      injector::MakeCALL(0xFFB9E2, CreateVertexShaderHook, true);
+      injector::MakeCALL(0xFFBA31, CreatePixelShaderHook, true);
 
-        struct SetVertexShaderHook
-        {
-            void operator()(injector::reg_pack& regs)
-            {
-                if (IsSplitScreenActive() || GetDiff() > 1.0f)
-                {
-                    auto pShader = (IDirect3DVertexShader9*)regs.ecx;
-                    if (pShader == shader_4F0EE939)
-                    {
-                        regs.ecx = 0;
-                    }
-                }
-                *(uint32_t*)(regs.ebx + 0x24) = regs.ecx;
-                regs.eax = *(uint32_t*)(regs.esi + 0x0);
-            }
-        }; injector::MakeInline<SetVertexShaderHook>(0xCCD0A4);
+        //struct SetVertexShaderHook
+        //{
+        //    void operator()(injector::reg_pack& regs)
+        //    {
+        //        if (IsSplitScreenActive() || GetDiff() > 1.0f)
+        //        {
+        //            auto pShader = (IDirect3DVertexShader9*)regs.ecx;
+        //            if (pShader == shader_4F0EE939)
+        //            {
+        //                regs.ecx = 0;
+        //            }
+        //        }
+        //        *(uint32_t*)(regs.ebx + 0x24) = regs.ecx;
+        //        regs.eax = *(uint32_t*)(regs.esi + 0x0);
+        //    }
+        //}; injector::MakeInline<SetVertexShaderHook>(0xCCD0A4);
     }
 
     if (bDisableFilmGrain)
@@ -701,17 +950,14 @@ void Init()
 
     if (bBorderlessWindowed)
     {
-        injector::MakeNOP(0xC74C0C, 6, true);
-        injector::MakeCALL(0xC74C0C, WindowedModeWrapper::CreateWindowExA_Hook, true);
-        injector::MakeNOP(0xC75D67, 6, true);
-        injector::MakeCALL(0xC75D67, WindowedModeWrapper::CreateWindowExW_Hook, true);
-        injector::MakeNOP(0xC75EE5, 6, true);
-        injector::MakeCALL(0xC75EE5, WindowedModeWrapper::CreateWindowExW_Hook, true);
-        injector::MakeNOP(0xCCB096, 6, true);
-        injector::MakeCALL(0xCCB096, WindowedModeWrapper::SetWindowLongA_Hook, true);
-        injector::MakeNOP(0xCCB08B, 6, true);
-        injector::MakeCALL(0xCCB08B, WindowedModeWrapper::AdjustWindowRect_Hook, true);
-        //0xCCB0BA: needs WindowedModeWrapper::SetWindowPos_Hook here
+        IATHook::Replace(GetModuleHandleA(NULL), "USER32.DLL",
+            std::forward_as_tuple("CreateWindowExA", WindowedModeWrapper::CreateWindowExA_Hook),
+            std::forward_as_tuple("CreateWindowExW", WindowedModeWrapper::CreateWindowExW_Hook),
+            std::forward_as_tuple("SetWindowLongA", WindowedModeWrapper::SetWindowLongA_Hook),
+            std::forward_as_tuple("SetWindowLongW", WindowedModeWrapper::SetWindowLongW_Hook),
+            std::forward_as_tuple("AdjustWindowRect", WindowedModeWrapper::AdjustWindowRect_Hook),
+            std::forward_as_tuple("SetWindowPos", WindowedModeWrapper::SetWindowPos_Hook)
+        );
     }
 
     //Episode 4 finale stuck controls fix
@@ -723,13 +969,134 @@ void Init()
         injector::WriteMemory(0xA97206 + 4, 1000, true); //max fps
         injector::WriteMemory(0xA9796C + 4, 1000, true); //max fps
     }
+
+    if (bDisableCreateQuery)
+    {
+        auto pattern = hook::pattern("51 80 B9 ? ? ? ? ? 8B 91");
+        injector::MakeJMP(pattern.get_first(), gpuCommandBufferSync, true);
+    }
+
+    if (bAutoclicker)
+    {
+        pXInputGetState = std::move(IATHook::Replace(GetModuleHandleA(NULL), "XINPUT1_3.dll",
+            std::forward_as_tuple("XInputGetState@2", XInputGetStateHook)
+        )["XInputGetState@2"]);
+        
+        auto pattern = hook::pattern("E8 ? ? ? ? 8B D0 85 D2 75 13 8B 07 8B CF FF 50 60 56 FF 15 ? ? ? ? 5E 5F C2 0C 00 8B CA 53 8D 59 01 8D A4 24");
+        hb_954B40.fun = injector::MakeCALL(pattern.get_first(), sub_954B40, true).get();
+    }
+
+    if (nForceLogo)
+    {
+        auto pattern = hook::pattern("E8 ? ? ? ? 83 F8 03 77 ? FF 24 85 ? ? ? ? 6A 01 68 04 8F 39 01");
+        injector::MakeCALL(pattern.get_first(), sub_984240, true);
+
+        pattern = hook::pattern("E8 ? ? ? ? 83 F8 03 0F 87 ? ? ? ? FF 24 85 ? ? ? ? 68 E8 8E 39 01");
+        injector::MakeCALL(pattern.get_first(), sub_984240, true);
+
+        pattern = hook::pattern("E8 ? ? ? ? 83 F8 03 77 ? FF 24 85 ? ? ? ? 6A 01 68 E8 EC 3B 01");
+        injector::MakeCALL(pattern.get_first(), sub_984240, true);
+
+        pattern = hook::pattern("E8 ? ? ? ? 83 F8 03 0F 87 ? ? ? ? FF 24 85 ? ? ? ? 68 B4 EC 3B 01");
+        injector::MakeCALL(pattern.get_first(), sub_984240, true);
+    }
+
+    {
+        static auto sPlayerPtr = *hook::get_pattern<void*>("8B 0D ? ? ? ? 56 E8 ? ? ? ? 85 C0 74 7B 8B C8", 2);
+
+        LEDEffects::Inject([]()
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            
+            if (sPlayerPtr)
+            {
+                static auto sub_6E6A70 = [](int* _this) -> void*
+                {
+                    if (!_this)
+                        return nullptr;
+            
+                    auto j = 0;
+                    for (auto i = _this + 8; !*i || *(DWORD*)(*i + 0x7920); ++i)
+                    {
+                        if (++j >= 8)
+                            return nullptr;
+                    }
+                    return (void*)_this[j + 8];
+                };
+                auto pPlayerPtr = sub_6E6A70(*(int**)sPlayerPtr);
+            
+                if (pPlayerPtr)
+                {
+                    auto Player1Health = PtrWalkthrough<int32_t>(&pPlayerPtr, 0x1A08);
+                    auto Player2Health = PtrWalkthrough<int32_t>(&pPlayerPtr, 0x1A0C);
+            
+                    if (Player1Health && Player2Health)
+                    {
+                        auto health1 = *Player1Health;
+                        auto health2 = *Player2Health;
+                        if (health1 > 1)
+                        {
+                            if (health1 <= 250) {
+                                LEDEffects::SetLightingLeftSide(26, 4, 4, true, false); //red
+                                LEDEffects::DrawCardiogram(100, 0, 0, 0, 0, 0); //red
+                            }
+                            else if (health1 <= 350) {
+                                LEDEffects::SetLightingLeftSide(50, 30, 4, true, false); //orange
+                                LEDEffects::DrawCardiogram(67, 0, 0, 0, 0, 0); //orange
+                            }
+                            else {
+                                LEDEffects::SetLightingLeftSide(10, 30, 4, true, false);  //green
+                                LEDEffects::DrawCardiogram(0, 100, 0, 0, 0, 0); //green
+                            }
+                        }
+                        else
+                        {
+                            LEDEffects::SetLightingLeftSide(26, 4, 4, false, true); //red
+                            LEDEffects::DrawCardiogram(100, 0, 0, 0, 0, 0, true);
+                        }
+            
+                        if (health2 > 1)
+                        {
+                            if (health2 <= 250) {
+                                LEDEffects::SetLightingRightSide(26, 4, 4, true, false); //red
+                                LEDEffects::DrawCardiogramNumpad(100, 0, 0, 0, 0, 0); //red
+                            }
+                            else if (health2 <= 350) {
+                                LEDEffects::SetLightingRightSide(50, 30, 4, true, false); //orange
+                                LEDEffects::DrawCardiogramNumpad(67, 0, 0, 0, 0, 0); //orange
+                            }
+                            else {
+                                LEDEffects::SetLightingRightSide(10, 30, 4, true, false);  //green
+                                LEDEffects::DrawCardiogramNumpad(0, 100, 0, 0, 0, 0); //green
+                            }
+                        }
+                        else
+                        {
+                            LEDEffects::SetLightingRightSide(26, 4, 4, false, true); //red
+                            LEDEffects::DrawCardiogramNumpad(100, 0, 0, 0, 0, 0, true);
+                        }
+                    }
+                    else
+                    {
+                        LogiLedStopEffects();
+                        LEDEffects::SetLighting(90, 36, 3);
+                    }
+                }
+                else
+                {
+                    LogiLedStopEffects();
+                    LEDEffects::SetLighting(90, 36, 3);
+                }
+            }
+        });
+    }
 }
 
 CEXP void InitializeASI()
 {
     std::call_once(CallbackHandler::flag, []()
     {
-        CallbackHandler::RegisterCallback(Init, hook::pattern("F3 0F 5C 15 ? ? ? ? F3 0F 59 E5"));
+        CallbackHandler::RegisterCallbackAtGetSystemTimeAsFileTime(Init, hook::pattern("F3 0F 5C 15 ? ? ? ? F3 0F 59 E5"));
     });
 }
 
@@ -739,64 +1106,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
     {
         if (!IsUALPresent()) { InitializeASI(); }
     }
+    else if (reason == DLL_PROCESS_DETACH)
+    {
+
+    }
     return TRUE;
-}
-
-uint32_t crc32_tab[] = {
-  0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f,
-  0xe963a535, 0x9e6495a3, 0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988,
-  0x09b64c2b, 0x7eb17cbd, 0xe7b82d07, 0x90bf1d91, 0x1db71064, 0x6ab020f2,
-  0xf3b97148, 0x84be41de, 0x1adad47d, 0x6ddde4eb, 0xf4d4b551, 0x83d385c7,
-  0x136c9856, 0x646ba8c0, 0xfd62f97a, 0x8a65c9ec, 0x14015c4f, 0x63066cd9,
-  0xfa0f3d63, 0x8d080df5, 0x3b6e20c8, 0x4c69105e, 0xd56041e4, 0xa2677172,
-  0x3c03e4d1, 0x4b04d447, 0xd20d85fd, 0xa50ab56b, 0x35b5a8fa, 0x42b2986c,
-  0xdbbbc9d6, 0xacbcf940, 0x32d86ce3, 0x45df5c75, 0xdcd60dcf, 0xabd13d59,
-  0x26d930ac, 0x51de003a, 0xc8d75180, 0xbfd06116, 0x21b4f4b5, 0x56b3c423,
-  0xcfba9599, 0xb8bda50f, 0x2802b89e, 0x5f058808, 0xc60cd9b2, 0xb10be924,
-  0x2f6f7c87, 0x58684c11, 0xc1611dab, 0xb6662d3d, 0x76dc4190, 0x01db7106,
-  0x98d220bc, 0xefd5102a, 0x71b18589, 0x06b6b51f, 0x9fbfe4a5, 0xe8b8d433,
-  0x7807c9a2, 0x0f00f934, 0x9609a88e, 0xe10e9818, 0x7f6a0dbb, 0x086d3d2d,
-  0x91646c97, 0xe6635c01, 0x6b6b51f4, 0x1c6c6162, 0x856530d8, 0xf262004e,
-  0x6c0695ed, 0x1b01a57b, 0x8208f4c1, 0xf50fc457, 0x65b0d9c6, 0x12b7e950,
-  0x8bbeb8ea, 0xfcb9887c, 0x62dd1ddf, 0x15da2d49, 0x8cd37cf3, 0xfbd44c65,
-  0x4db26158, 0x3ab551ce, 0xa3bc0074, 0xd4bb30e2, 0x4adfa541, 0x3dd895d7,
-  0xa4d1c46d, 0xd3d6f4fb, 0x4369e96a, 0x346ed9fc, 0xad678846, 0xda60b8d0,
-  0x44042d73, 0x33031de5, 0xaa0a4c5f, 0xdd0d7cc9, 0x5005713c, 0x270241aa,
-  0xbe0b1010, 0xc90c2086, 0x5768b525, 0x206f85b3, 0xb966d409, 0xce61e49f,
-  0x5edef90e, 0x29d9c998, 0xb0d09822, 0xc7d7a8b4, 0x59b33d17, 0x2eb40d81,
-  0xb7bd5c3b, 0xc0ba6cad, 0xedb88320, 0x9abfb3b6, 0x03b6e20c, 0x74b1d29a,
-  0xead54739, 0x9dd277af, 0x04db2615, 0x73dc1683, 0xe3630b12, 0x94643b84,
-  0x0d6d6a3e, 0x7a6a5aa8, 0xe40ecf0b, 0x9309ff9d, 0x0a00ae27, 0x7d079eb1,
-  0xf00f9344, 0x8708a3d2, 0x1e01f268, 0x6906c2fe, 0xf762575d, 0x806567cb,
-  0x196c3671, 0x6e6b06e7, 0xfed41b76, 0x89d32be0, 0x10da7a5a, 0x67dd4acc,
-  0xf9b9df6f, 0x8ebeeff9, 0x17b7be43, 0x60b08ed5, 0xd6d6a3e8, 0xa1d1937e,
-  0x38d8c2c4, 0x4fdff252, 0xd1bb67f1, 0xa6bc5767, 0x3fb506dd, 0x48b2364b,
-  0xd80d2bda, 0xaf0a1b4c, 0x36034af6, 0x41047a60, 0xdf60efc3, 0xa867df55,
-  0x316e8eef, 0x4669be79, 0xcb61b38c, 0xbc66831a, 0x256fd2a0, 0x5268e236,
-  0xcc0c7795, 0xbb0b4703, 0x220216b9, 0x5505262f, 0xc5ba3bbe, 0xb2bd0b28,
-  0x2bb45a92, 0x5cb36a04, 0xc2d7ffa7, 0xb5d0cf31, 0x2cd99e8b, 0x5bdeae1d,
-  0x9b64c2b0, 0xec63f226, 0x756aa39c, 0x026d930a, 0x9c0906a9, 0xeb0e363f,
-  0x72076785, 0x05005713, 0x95bf4a82, 0xe2b87a14, 0x7bb12bae, 0x0cb61b38,
-  0x92d28e9b, 0xe5d5be0d, 0x7cdcefb7, 0x0bdbdf21, 0x86d3d2d4, 0xf1d4e242,
-  0x68ddb3f8, 0x1fda836e, 0x81be16cd, 0xf6b9265b, 0x6fb077e1, 0x18b74777,
-  0x88085ae6, 0xff0f6a70, 0x66063bca, 0x11010b5c, 0x8f659eff, 0xf862ae69,
-  0x616bffd3, 0x166ccf45, 0xa00ae278, 0xd70dd2ee, 0x4e048354, 0x3903b3c2,
-  0xa7672661, 0xd06016f7, 0x4969474d, 0x3e6e77db, 0xaed16a4a, 0xd9d65adc,
-  0x40df0b66, 0x37d83bf0, 0xa9bcae53, 0xdebb9ec5, 0x47b2cf7f, 0x30b5ffe9,
-  0xbdbdf21c, 0xcabac28a, 0x53b39330, 0x24b4a3a6, 0xbad03605, 0xcdd70693,
-  0x54de5729, 0x23d967bf, 0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94,
-  0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
-};
-
-uint32_t crc32(uint32_t crc, const void* buf, size_t size)
-{
-    const uint8_t* p;
-
-    p = (uint8_t*)buf;
-    crc = crc ^ ~0U;
-
-    while (size--)
-        crc = crc32_tab[(crc ^ *p++) & 0xFF] ^ (crc >> 8);
-
-    return crc ^ ~0U;
 }

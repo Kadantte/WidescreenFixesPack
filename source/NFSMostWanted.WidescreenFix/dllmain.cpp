@@ -704,7 +704,6 @@ void Init()
             }
         }; injector::MakeInline<HudPosXHook6>(pattern.get_first(0), pattern.get_first(8));
 
-
         //mirror position fix
         pattern = hook::pattern("C7 44 24 70 00 00 E1 43 C7 44 24 74 00 00 98 41 C7 84 24 80 00 00 00 00 00 3E 43"); // 0x6E70C0
         struct MirrorPosXHook

@@ -3,9 +3,15 @@
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
-void* GetGP()
+uint32_t parseCommand(uint32_t command, uint32_t from, uint32_t to)
 {
-    unsigned int gp;
+    uint32_t mask = ((1 << (to - from + 1)) - 1) << from;
+    return (command & mask) >> from;
+}
+
+void* _GetGP()
+{
+    void* gp;
     asm(
         "move %0, $gp\n"
         : "=r"(gp)
@@ -20,17 +26,17 @@ uintptr_t adjustAddress(uintptr_t addr)
 
 void WriteMemoryRaw(uintptr_t addr, void* value, size_t size)
 {
-    memcpy(adjustAddress(addr), value, size);
+    memcpy((void*)adjustAddress(addr), value, size);
 }
 
 void ReadMemoryRaw(uintptr_t addr, void* ret, size_t size)
 {
-    memcpy(ret, adjustAddress(addr), size);
+    memcpy((void*)ret, (void*)adjustAddress(addr), size);
 }
 
 void MemoryFill(uintptr_t addr, uint8_t value, size_t size)
 {
-    unsigned char* p = adjustAddress(addr);
+    unsigned char* p = (unsigned char*)adjustAddress(addr);
     while (size--)
     {
         *p++ = (unsigned char)value;
@@ -102,25 +108,41 @@ double ReadMemoryDouble(uintptr_t addr)
     return *(double*)(adjustAddress(addr));
 }
 
-void MakeJMP(uintptr_t at, uintptr_t dest)
+uintptr_t GetBranchDestination(uintptr_t at)
 {
-    WriteMemory32(adjustAddress(at), (0x08000000 | ((adjustAddress(dest) & 0x0FFFFFFC) >> 2)));
+    static const uint32_t instr_len = 4;
+
+    uint8_t J = parseCommand(j(0x123456), 26, 31);
+    uint8_t JAL = parseCommand(jal(0x123456), 26, 31);
+
+    uint32_t bytes = ReadMemory32(at);
+    uint8_t instr = parseCommand(bytes, 26, 31);
+
+    if (instr == J || instr == JAL)
+        return parseCommand(bytes, 0, 25) * instr_len;
+    return 0;
 }
 
-void MakeJMPwNOP(uintptr_t at, uintptr_t dest)
+uintptr_t MakeJMP(uintptr_t at, uintptr_t dest)
 {
+    uintptr_t bd = GetBranchDestination(at);
     WriteMemory32(adjustAddress(at), (0x08000000 | ((adjustAddress(dest) & 0x0FFFFFFC) >> 2)));
-    MakeNOP(adjustAddress(at + 4));
+    return bd;
 }
 
-void MakeJAL(uintptr_t at, uintptr_t dest)
+uintptr_t MakeJMPwNOP(uintptr_t at, uintptr_t dest)
 {
+    uintptr_t bd = GetBranchDestination(at);
+    WriteMemory32(adjustAddress(at), (0x08000000 | ((adjustAddress(dest) & 0x0FFFFFFC) >> 2)));
+    injector.MakeNOP(adjustAddress(at + 4));
+    return bd;
+}
+
+uintptr_t MakeJAL(uintptr_t at, uintptr_t dest)
+{
+    uintptr_t bd = GetBranchDestination(at);
     WriteMemory32(adjustAddress(at), (0x0C000000 | ((adjustAddress(dest)) >> 2)));
-}
-
-void MakeCALL(uintptr_t at, uintptr_t dest)
-{
-    WriteMemory32(adjustAddress(at), (0x0C000000 | (((adjustAddress(dest)) >> 2) & 0x03FFFFFF)));
+    return bd;
 }
 
 void MakeNOP(uintptr_t at)
@@ -160,7 +182,7 @@ uintptr_t MakeInline(size_t instrCount, uintptr_t at, ...)
 }
 
 uintptr_t MakeCallStub(uintptr_t numInstr) {
-    return AllocMemBlock(numInstr * sizeof(uintptr_t));
+    return (uintptr_t)AllocMemBlock(numInstr * sizeof(uintptr_t));
 }
 
 void MakeLUIORI(uintptr_t at, RegisterID reg, float imm)
@@ -169,7 +191,8 @@ void MakeLUIORI(uintptr_t at, RegisterID reg, float imm)
     injector.WriteMemory32(functor + 0, lui(reg, HIWORD(imm)));
     injector.WriteMemory32(functor + 4, ori(reg, reg, LOWORD(imm)));
     injector.MakeJMP(functor + 8, at + 4); // should be +8 as well, but it won't work, e.g. two lui instructions in a row
-    injector.MakeNOP(functor + 12);
+    injector.WriteMemory32(functor + 12, injector.ReadMemory32(at + 4));
+    injector.MakeNOP(at + 4);
     injector.MakeJMP(at, functor);
 }
 
@@ -181,12 +204,6 @@ void MakeLI(uintptr_t at, RegisterID reg, int32_t imm)
     injector.MakeJMP(functor + 8, at + 4); // should be +8 as well, but it won't work as well
     injector.MakeNOP(functor + 12);
     injector.MakeJMP(at, functor);
-}
-
-uint32_t parseCommand(uint32_t command, uint32_t from, uint32_t to)
-{
-    uint32_t mask = ((1 << (to - from + 1)) - 1) << from;
-    return (command & mask) >> from;
 }
 
 uint32_t isDelaySlotNearby(uintptr_t at)
@@ -274,7 +291,7 @@ void MakeInlineLI(uintptr_t at, int32_t imm)
 
 struct injector_t injector =
 {
-    .GetGP = GetGP,
+    .GetGP = _GetGP,
     .WriteMemoryRaw = WriteMemoryRaw,
     .ReadMemoryRaw = ReadMemoryRaw,
     .MemoryFill = MemoryFill,
@@ -291,14 +308,15 @@ struct injector_t injector =
     .ReadMemory64 = ReadMemory64,
     .ReadMemoryFloat = ReadMemoryFloat,
     .ReadMemoryDouble = ReadMemoryDouble,
+    .GetBranchDestination = GetBranchDestination,
     .MakeJMP = MakeJMP,
     .MakeJMPwNOP = MakeJMPwNOP,
     .MakeJAL = MakeJAL,
-    .MakeCALL = MakeCALL,
     .MakeNOP = MakeNOP,
     .MakeNOPWithSize = MakeNOPWithSize,
     .MakeRangedNOP = MakeRangedNOP,
     .MakeInline = MakeInline,
     .MakeInlineLUIORI = MakeInlineLUIORI,
+    .MakeLUIORI = MakeLUIORI,
     .MakeInlineLI = MakeInlineLI
 };

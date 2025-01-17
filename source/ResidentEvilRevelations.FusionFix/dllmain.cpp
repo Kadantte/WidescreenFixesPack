@@ -1,6 +1,11 @@
 #include "stdafx.h"
+#include "LEDEffects.h"
 #include <d3d9.h>
+#include <d3dx9.h>
+#pragma comment(lib, "d3dx9.lib")
 #include <vector>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
 
 constexpr auto defaultAspectRatio = 16.0f / 9.0f;
 float fFOVFactor = 1.0f;
@@ -94,12 +99,85 @@ enum GUI
     uGUISubtitlesFix = 0x10924B0,
 };
 
+static IDirect3DVertexShader9* g_screenVertexShader = nullptr;
+static IDirect3DPixelShader9* g_wmvYuvDecodePixelShader = nullptr;
+static IDirect3DVertexShader9* g_myScreenVertexShader = nullptr;
+
+std::map<uintptr_t, uintptr_t> addrTbl;
+
+void FillAddressTable()
+{
+    addrTbl[0x11E7B9C] = (uintptr_t)*hook::get_pattern<uintptr_t>("8B 3D ? ? ? ? 6A 08", 2);
+    addrTbl[0xE98FAF] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? 8B 7C 24 1C 8B CF");
+    addrTbl[0xD00F71] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? F3 0F 10 8C 24 ? ? ? ? F3 0F 10 94 24 ? ? ? ? F3 0F 10 A4 24 ? ? ? ? F3 0F 10 AC 24 ? ? ? ? F3 0F 10 BC 24");
+    addrTbl[0xCDC9D9] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? F3 0F 10 44 24 ? F3 0F 10 4C 24 ? F3 0F 10 7C 24 ? F3 0F 10 6C 24 ? 0F 28 D1");
+    addrTbl[0xC0346A] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? 85 DB 74 36");
+    addrTbl[0xC52BF4] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? F3 0F 10 44 24 ? F3 0F 10 4C 24 ? F3 0F 10 7C 24 ? F3 0F 10 6C 24 ? F3 0F 10 74 24 ? 0F 28 D8 F3 0F 59 5C 24 ? 0F 28 D1");
+    addrTbl[0xBCC44E] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? 8B 7D 08 38 9E");
+    addrTbl[0xBC62D4] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? 80 7D 10 00 74 23");
+    addrTbl[0xBABE12] = (uintptr_t)hook::get_pattern("8B 87 ? ? ? ? DC C9");
+    addrTbl[0xBA4440] = (uintptr_t)hook::get_pattern("55 8B EC 83 E4 F0 81 EC ? ? ? ? 53 56 8B F1 83 BE ? ? ? ? ? 57 0F 84 ? ? ? ? 8B 8E");
+    addrTbl[0xBA1050] = (uintptr_t)hook::get_pattern("83 EC 34 8B 44 24 38 53 55 56 8B 70 04");
+    addrTbl[0xB98830] = (uintptr_t)hook::get_pattern("51 56 57 8B F9 8B 77 60");
+    addrTbl[0xB83530] = (uintptr_t)hook::get_pattern("56 8B 74 24 08 57 81 C6");
+    addrTbl[0xB838F0] = (uintptr_t)hook::get_pattern("8B 81 ? ? ? ? 83 E0 F0 D9 40 4C");
+    addrTbl[0xB838E0] = (uintptr_t)hook::get_pattern("8B 81 ? ? ? ? 83 E0 F0 D9 40 5C");
+    addrTbl[0xAA52EA] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? F3 0F 10 83 ? ? ? ? F3 0F 10 94 24");
+    addrTbl[0xA1025D] = (uintptr_t)hook::get_pattern("F3 0F 59 05 ? ? ? ? F3 0F 11 44 24 ? F3 0F 10 41", 37);
+    addrTbl[0x47249D] = (uintptr_t)hook::get_pattern("F3 0F 10 40 ? F3 0F 11 04 24 E8 ? ? ? ? C2 04 00", 10);
+    addrTbl[0x4962E8] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? 5F 8B C6 5E 5B C2 04 00 8B 86 ? ? ? ? 83 3C B8 00 74 A5");
+    addrTbl[0x498AE5] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? 8B C6 5E C2 04 00 B8");
+    addrTbl[0x480F4E] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? 85 DB 74 2E 8B 56 50");
+    addrTbl[0x0107FF78] = (uintptr_t)*hook::get_pattern<uintptr_t>("DB 04 85 ? ? ? ? 5E", 3);
+    addrTbl[0x9EE595] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? 83 BE ? ? ? ? ? 8B C7");
+    addrTbl[0x8F2230] = (uintptr_t)injector::GetBranchDestination(hook::get_pattern("E8 ? ? ? ? 85 DB 74 2E 8B 56 50")).as_int();
+    addrTbl[0x8CFFF3] = (uintptr_t)hook::get_pattern("F3 0F 11 04 24 E8 ? ? ? ? 8B C6 5E 59", 5);
+    addrTbl[0x8A1406] = (uintptr_t)hook::get_pattern("C7 44 24 ? ? ? ? ? 8B FF 83 7C 24");
+    addrTbl[0x8A1346] = (uintptr_t)hook::get_pattern("C7 44 24 ? ? ? ? ? C7 44 24 ? ? ? ? ? EB 08 8D A4 24 00 00 00 00 90 83 BE");
+    addrTbl[0x8A134E] = (uintptr_t)hook::get_pattern("C7 44 24 ? ? ? ? ? EB 08 8D A4 24 00 00 00 00 90 83 BE");
+    addrTbl[0x8A13FE] = (uintptr_t)hook::get_pattern("C7 44 24 ? ? ? ? ? C7 44 24 ? ? ? ? ? 8B FF");
+    addrTbl[0x7BB17A] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? 8B 86 ? ? ? ? 8B 0D ? ? ? ? 83 C4 04");
+    addrTbl[0x5ED652] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? F3 0F 10 7C 24 ? F3 0F 10 44 24 ? F3 0F 10 5C 24");
+
+    auto off_1092380 = *hook::get_pattern<uintptr_t*>("68 C0 09 00 00 8B C8 FF D2 8B F0 85 F6 74 11 8B CE E8 ? ? ? ? C7 06", 24);
+    addrTbl[0x10923AC] = (uintptr_t)&off_1092380[11];
+
+    auto off_10D49D8 = *hook::get_pattern<uintptr_t*>("C7 07 ? ? ? ? E8 ? ? ? ? 80 BF ? ? ? ? ? C7 87", 2);
+    addrTbl[0x10D4A04] = (uintptr_t)&off_10D49D8[11];
+
+    auto off_10D4AE8 = *hook::get_pattern<uintptr_t*>("C7 06 ? ? ? ? 8B C6 5E C3 33 C0 5E C3 56 57", 2);
+    addrTbl[0x10D4B14] = (uintptr_t)&off_10D4AE8[11];
+
+    auto off_10D4BC8 = *hook::get_pattern<uintptr_t*>("C7 06 ? ? ? ? C6 86 ? ? ? ? ? 85 C9", 2);
+    addrTbl[0x10D4BF4] = (uintptr_t)&off_10D4BC8[11];
+
+    auto off_108DC90 = *hook::get_pattern<uintptr_t*>("C7 06 ? ? ? ? C7 86 ? ? ? ? ? ? ? ? C7 86 ? ? ? ? ? ? ? ? E8 ? ? ? ? 81 66 ? ? ? ? ? 8B C6 5E C3 33 C0", 2);
+    addrTbl[uGUI_PauseBlurHD] = (uintptr_t)&off_108DC90[22];
+
+    auto off_1084C98 = *hook::get_pattern<uintptr_t*>("68 36 01 00 00 8B CE C7 06 ? ? ? ? E8 ? ? ? ? 8B 46 0C 25 ? ? ? ? 0D 00 00 01 00", 9);
+    addrTbl[uGUI_Damage] = (uintptr_t)&off_1084C98[22];
+
+    auto off_1084DA0 = *hook::get_pattern<uintptr_t*>("68 2C 01 00 00 8B CE C7 06 ? ? ? ? E8 ? ? ? ? 8B 46 0C 25 ? ? ? ? 0D 00 00 01 00", 9);
+    addrTbl[uGUI_DamageChoke] = (uintptr_t)&off_1084DA0[22];
+
+    addrTbl[0xD49701] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? 89 47 ? 0F B7 44 24");
+    addrTbl[0xD49744] = (uintptr_t)hook::get_pattern("E8 ? ? ? ? 89 47 ? 0F B7 4C 24");
+    addrTbl[0xB6BA4F] = (uintptr_t)hook::get_pattern("57 FF D2 E9 ? ? ? ? B8 AB AA AA AA");
+
+    #if _DEBUG
+    for (auto& it : addrTbl)
+    {
+        assert(it.first == it.second);
+    }
+    #endif // _DEBUG
+}
+
 int32_t GetResX()
 {
     if (ResX)
         return ResX;
     else
-        return *(int32_t*)(*(uint32_t*)0x11E7B9C + 0xB8);
+        return *(int32_t*)(*(uint32_t*)addrTbl[0x11E7B9C] + 0xB8);
 }
 
 int32_t GetResY()
@@ -107,7 +185,7 @@ int32_t GetResY()
     if (ResY)
         return ResY;
     else
-        return *(int32_t*)(*(uint32_t*)0x11E7B9C + 0xBC);
+        return *(int32_t*)(*(uint32_t*)addrTbl[0x11E7B9C] + 0xBC);
 }
 
 int32_t GetRelativeResX()
@@ -141,6 +219,7 @@ enum
 {
     RESCALE = 0xAAAAEEEE,
     OFFSET = 0xAAAFFFFF,
+    SUBTITLES = 0xDDDDDDDD,
 };
 
 void __fastcall sub_BA1050(int _this, int edx, int a2)
@@ -174,10 +253,10 @@ void __fastcall sub_BA1050(int _this, int edx, int a2)
     int v29; // [esp+34h] [ebp-10h]
     int v30; // [esp+38h] [ebp-Ch]
 
-    auto sub_B83530 = (int(__fastcall*) (char*, int, int))0xB83530;
-    auto sub_B838F0 = (float(__fastcall*) (char*, int))0xB838F0;
-    auto sub_B838E0 = (float(__fastcall*) (char*, int))0xB838E0;
-    auto sub_B98830 = (void(__fastcall*) (uint32_t*, int, int))0xB98830;
+    auto sub_B83530 = (int(__fastcall*) (char*, int, int))addrTbl[0xB83530];
+    auto sub_B838F0 = (float(__fastcall*) (char*, int))addrTbl[0xB838F0];
+    auto sub_B838E0 = (float(__fastcall*) (char*, int))addrTbl[0xB838E0];
+    auto sub_B98830 = (void(__fastcall*) (uint32_t*, int, int))addrTbl[0xB98830];
 
     v2 = *(char**)(a2 + 4);
     v3 = *((uint32_t*)v2 + 49);
@@ -258,11 +337,12 @@ void __fastcall sub_BA1050(int _this, int edx, int a2)
             v15[3] = (float)(v17 * v25) + 1.0;
         }
         break;
+        case SUBTITLES:
         case OFFSET:
         {
             v16 = 2.0 / (float)(v3 - v26);
             v17 = -2.0 / (float)(v28 - v27);
-            v15[0] = v16 * v7;
+            v15[0] = v16 * v7 * ((edx == SUBTITLES) ? (1.0f / GetDiff()) : 1.0f);
             v15[1] = v17 * v8;
             v15[2] = (float)(v16 * v24) - (1.0f / GetDiff());
             v15[3] = (float)(v17 * v25) + 1.0;
@@ -317,8 +397,8 @@ void __cdecl sub_79BB50(int a1)
     int v12; // [esp+Ch] [ebp-10h]
     int v13; // [esp+10h] [ebp-Ch]
     
-    auto sub_B83530 = (int(__fastcall*) (char*, int, int))0xB83530;
-    auto sub_B838E0 = (float(__fastcall*) (char*, int))0xB838E0;
+    auto sub_B83530 = (int(__fastcall*) (char*, int, int))addrTbl[0xB83530];
+    auto sub_B838E0 = (float(__fastcall*) (char*, int))addrTbl[0xB838E0];
     
     v1 = *(uint32_t**)(a1 + 4);
     v2 = v1[47];
@@ -380,6 +460,12 @@ void __fastcall sub_BA1050_rescale(int _this, int edx, int a2)
 
 void __fastcall sub_BA1050_offset(int _this, int edx, int a2)
 {
+    auto Subtitles = (const char*)(*(uintptr_t*)_this + 0xD4);
+    auto uGUISubtitlesFix = (const char*)(*(uintptr_t*)_this + 0x224);
+
+    if ((!IsBadReadPtr(Subtitles, sizeof(char*)) && std::string_view(Subtitles) == "Subtitles") || (!IsBadReadPtr(uGUISubtitlesFix, sizeof(char*)) && std::string_view(uGUISubtitlesFix) == "uGUISubtitlesFix"))
+        return sub_BA1050(_this, SUBTITLES, a2);
+
     return sub_BA1050(_this, OFFSET, a2);
 }
 
@@ -387,18 +473,147 @@ void __fastcall sub_8F2230(void* _this, void* edx, float a2, float a3, float a4,
 {
     a4 *= fFOVFactor;
     a2 /= GetDiff();
-    return injector::fastcall<void(void*, void*, float, float, float, float)>::call(0x8F2230, _this, edx, a2, a3, a4, a5);
+    return injector::fastcall<void(void*, void*, float, float, float, float)>::call(addrTbl[0x8F2230], _this, edx, a2, a3, a4, a5);
 }
 
 void __fastcall sub_BA4440(void* _this, int edx, int* a2)
 {
-    if (*(uint32_t*)(*(uint32_t*)_this + 88) == 0xBA1050)
+    if (*(uint32_t*)(*(uint32_t*)_this + 88) == addrTbl[0xBA1050])
     {
         DWORD out;
         injector::UnprotectMemory((*(DWORD*)_this + 88), 4, out);
         *(uint32_t*)(*(DWORD*)_this + 88) = (uint32_t)&sub_BA1050_offset;
     }
-    return injector::fastcall<void(void*, int, int*)>::call(0xBA4440, _this, edx, a2);
+    return injector::fastcall<void(void*, int, int*)>::call(addrTbl[0xBA4440], _this, edx, a2);
+}
+
+bool bDisableCreateQuery = false;
+void __fastcall gpuCommandBufferSync(IDirect3DDevice9** m_ppD3DDevice, void* edx)
+{
+    if (bDisableCreateQuery)
+        return;
+
+    IDirect3DQuery9* pEventQuery = NULL;
+    m_ppD3DDevice[38]->CreateQuery(D3DQUERYTYPE_EVENT, &pEventQuery);
+
+    if (pEventQuery)
+    {
+        pEventQuery->Issue(D3DISSUE_END);
+        while (pEventQuery->GetData(NULL, 0, D3DGETDATA_FLUSH) == S_FALSE)
+            Sleep(0);
+        pEventQuery->Release();
+    }
+}
+
+std::vector<HWND> AppWindows;
+BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
+{
+    DWORD lpdwProcessId;
+    GetWindowThreadProcessId(hwnd, &lpdwProcessId);
+    if (lpdwProcessId == lParam)
+    {
+        if (IsWindowVisible(hwnd))
+            AppWindows.push_back(hwnd);
+    }
+    return TRUE;
+}
+
+IDirect3DVertexShader9* __stdcall CreateVertexShaderHook(const DWORD** a1)
+{
+    if (!a1)
+        return nullptr;
+
+    auto pDevice = (IDirect3DDevice9*)*((uint32_t*)*(uint32_t*)addrTbl[0x11E7B9C] + 0x26);
+
+    IDirect3DVertexShader9* pShader = nullptr;
+    pDevice->CreateVertexShader(a1[2], &pShader);
+
+    if (pShader != nullptr)
+    {
+        static std::vector<uint8_t> pbFunc;
+        UINT len;
+        pShader->GetFunction(nullptr, &len);
+        if (pbFunc.size() < len)
+            pbFunc.resize(len);
+
+        pShader->GetFunction(pbFunc.data(), &len);
+
+        auto crc = crc32(0, pbFunc.data(), len);
+
+        if (crc == 0x1287841D)
+        {
+            g_screenVertexShader = pShader;
+
+            // inject additional, alternative screenspace shader for FMV fixups
+            constexpr auto src = R"(
+            struct VS_INPUT {
+                float4 position : POSITION;
+            };
+            
+            struct VS_OUTPUT {
+                float4 position : POSITION;
+                float4 uv : TEXCOORD;
+            };
+            
+            float2 fScreenHalfPixelOffset : register(c1);
+            float fHorizontalAspectScale : register(c20);
+            
+            VS_OUTPUT main(VS_INPUT input)
+            {
+                VS_OUTPUT output;
+            
+                output.position = float4(
+                  -fScreenHalfPixelOffset.x + input.position.x * fHorizontalAspectScale,
+                  fScreenHalfPixelOffset.y + input.position.y,
+                  0.0,
+                  1.0);
+                output.uv = float4(
+                  1.0 * input.position.z,
+                  1.0 * input.position.w,
+                  0.0, 0.0
+                );
+            
+                return output;
+            })";
+
+            LPD3DXBUFFER code;
+            if (SUCCEEDED(D3DXCompileShader(src, strlen(src), nullptr, nullptr, "main", "vs_3_0", NULL, &code, nullptr, nullptr)))
+            {
+                pDevice->CreateVertexShader(reinterpret_cast<const DWORD*>(code->GetBufferPointer()), &g_myScreenVertexShader);
+            }
+        }
+    }
+
+    return pShader;
+}
+
+IDirect3DPixelShader9* __stdcall CreatePixelShaderHook(const DWORD** a1)
+{
+    if (!a1)
+        return nullptr;
+
+    auto pDevice = (IDirect3DDevice9*)*((uint32_t*)*(uint32_t*)addrTbl[0x11E7B9C] + 0x26);
+
+    IDirect3DPixelShader9* pShader = nullptr;
+    pDevice->CreatePixelShader(a1[2], &pShader);
+
+    if (pShader != nullptr)
+    {
+        UINT len;
+        pShader->GetFunction(nullptr, &len);
+        std::vector<uint8_t> pbFunc(len, 0);
+
+        pShader->GetFunction(pbFunc.data(), &len);
+
+        auto crc = crc32(0, pbFunc.data(), len);
+
+        if (crc == 0x310b2709)
+        {
+            g_wmvYuvDecodePixelShader = pShader;
+        }
+    }
+
+    return pShader;
 }
 
 void Init()
@@ -408,6 +623,9 @@ void Init()
     auto bDisableDamageOverlay = iniReader.ReadInteger("MAIN", "DisableDamageOverlay", 1) != 0;
     fFOVFactor= iniReader.ReadFloat("MAIN", "FOVFactor", 1.2f);
     if (fFOVFactor <= 0.0f) fFOVFactor = 1.0f;
+    bDisableCreateQuery = iniReader.ReadInteger("MAIN", "DisableCreateQuery", 0) != 0;
+
+    FillAddressTable();
 
     // unrestrict resolutons
     struct ResList
@@ -424,10 +642,10 @@ void Init()
         if (sscanf_s(strList[i].c_str(), "%dx%d", &w, &h) == 2 && w >= 640 && h >= 480)
             resList.emplace_back((uint32_t)strList[i].data(), i);
     }
-    injector::WriteMemory(0x8A1346 + 4, resList.data(), true);
-    injector::WriteMemory(0x8A13FE + 4, resList.data(), true);
-    injector::WriteMemory(0x8A134E + 4, resList.size(), true);
-    injector::WriteMemory(0x8A1406 + 4, resList.size(), true);
+    injector::WriteMemory(addrTbl[0x8A1346] + 4, resList.data(), true);
+    injector::WriteMemory(addrTbl[0x8A13FE] + 4, resList.data(), true);
+    injector::WriteMemory(addrTbl[0x8A134E] + 4, resList.size(), true);
+    injector::WriteMemory(addrTbl[0x8A1406] + 4, resList.size(), true);
 
     // overwriting aspect ratio
     hook::pattern("0F 84 ? ? ? ? 48 ? ? 48 ? ? 89 8E").for_each_result([](hook::pattern_match match)
@@ -448,73 +666,193 @@ void Init()
         injector::MakeInline<hook_ebp_edi>(match.get<void>(0), match.get<void>(12));
     });
 
-    // movies fix for ultra wide
-    struct MoviesWorkaround
-    {
-        void operator()(injector::reg_pack& regs)
-        {
-            regs.eax = (int32_t)((float)(*(int32_t*)(regs.edi + 0xB8)) / GetDiff());
-        }
-    }; injector::MakeInline<MoviesWorkaround>(0xBABE12, 0xBABE12 + 6);
-
     // GUI
-    injector::MakeJMP(0xBA1050, sub_BA1050_rescale, true);
-    injector::MakeCALL(0x7BB17A, sub_79BB50, true); // radar player blip fix
+    injector::MakeJMP(addrTbl[0xBA1050], sub_BA1050_rescale, true);
+    injector::MakeCALL(addrTbl[0x7BB17A], sub_79BB50, true); // radar player blip fix
 
-    injector::WriteMemory(0x10923AC, sub_BA4440, true);
-    //injector::WriteMemory(0x10D4A04, sub_BA4440, true); // loading tips
-    injector::WriteMemory(0x10D4B14, sub_BA4440, true); // main menu bg
-    injector::WriteMemory(0x10D4BF4, sub_BA4440, true); // probably you're dead screen
+    injector::WriteMemory(addrTbl[0x10923AC], sub_BA4440, true);
+    //injector::WriteMemory(addrTbl[0x10D4A04], sub_BA4440, true); // loading tips
+    injector::WriteMemory(addrTbl[0x10D4B14], sub_BA4440, true); // main menu bg
+    injector::WriteMemory(addrTbl[0x10D4BF4], sub_BA4440, true); // probably you're dead screen
 
-    injector::WriteMemory(uGUI_PauseBlurHD, sub_BA1050, true);
-
+    injector::WriteMemory(addrTbl[uGUI_PauseBlurHD], sub_BA1050, true);
+    
     if (bDisableDamageOverlay)
     {
-        injector::WriteMemory(uGUI_Damage, sub_BA1050_nop, true);
-        injector::WriteMemory(uGUI_DamageChoke, sub_BA1050_nop, true);
+        injector::WriteMemory(addrTbl[uGUI_Damage], sub_BA1050_nop, true);
+        injector::WriteMemory(addrTbl[uGUI_DamageChoke], sub_BA1050_nop, true);
     }
     else
     {
-        injector::WriteMemory(uGUI_Damage, sub_BA1050, true);
-        injector::WriteMemory(uGUI_DamageChoke, sub_BA1050, true);
+        injector::WriteMemory(addrTbl[uGUI_Damage], sub_BA1050, true);
+        injector::WriteMemory(addrTbl[uGUI_DamageChoke], sub_BA1050, true);
     }
 
     //Camera near clip fix
-    injector::MakeCALL(0x47249D, sub_8F2230, true);
-    injector::MakeCALL(0x480F4E, sub_8F2230, true);
-    injector::MakeCALL(0x4962E8, sub_8F2230, true);
-    injector::MakeCALL(0x498AE5, sub_8F2230, true);
-    injector::MakeCALL(0x5ED652, sub_8F2230, true);
-    injector::MakeCALL(0x8CFFF3, sub_8F2230, true);
-    injector::MakeCALL(0x9EE595, sub_8F2230, true);
-    injector::MakeCALL(0xA1025D, sub_8F2230, true);
-    injector::MakeCALL(0xAA52EA, sub_8F2230, true);
-    injector::MakeCALL(0xBC62D4, sub_8F2230, true);
-    injector::MakeCALL(0xBCC44E, sub_8F2230, true);
-    injector::MakeCALL(0xC0346A, sub_8F2230, true);
-    injector::MakeCALL(0xC52BF4, sub_8F2230, true);
-    injector::MakeCALL(0xCDC9D9, sub_8F2230, true);
-    injector::MakeCALL(0xD00F71, sub_8F2230, true);
-    injector::MakeCALL(0xE98FAF, sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0x47249D], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0x480F4E], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0x4962E8], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0x498AE5], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0x5ED652], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0x8CFFF3], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0x9EE595], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0xA1025D], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0xAA52EA], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0xBC62D4], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0xBCC44E], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0xC0346A], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0xC52BF4], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0xCDC9D9], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0xD00F71], sub_8F2230, true);
+    injector::MakeCALL(addrTbl[0xE98FAF], sub_8F2230, true);
+
+    injector::MakeCALL(addrTbl[0xD49701], CreateVertexShaderHook, true);
+    injector::MakeCALL(addrTbl[0xD49744], CreatePixelShaderHook, true);
+
+    // movies fix for ultra wide
+    {
+        static auto DrawPrimitiveHook = safetyhook::create_mid(addrTbl[0xB6BA4F], [](SafetyHookContext& regs)
+        {
+            auto g_device = (IDirect3DDevice9*)regs.edi;
+
+            // switch to a x-scaling vertex shader if drawing FMVs
+            IDirect3DPixelShader9* frag;
+            g_device->GetPixelShader(&frag);
+
+            if (frag != g_wmvYuvDecodePixelShader)
+                return;
+
+            IDirect3DVertexShader9* vert;
+            g_device->GetVertexShader(&vert);
+            if (vert != g_screenVertexShader)
+                return;
+
+            g_device->SetVertexShader(g_myScreenVertexShader);
+            const float horzScaleFactor = (defaultAspectRatio / GetAspectRatio());
+            const std::array<float, 4> shaderConsts = { horzScaleFactor, 0.0f, 0.0f, 0.0f };
+            g_device->SetVertexShaderConstantF(20, shaderConsts.data(), 1);
+        });
+    }
     
     if (bBorderlessWindowed)
     {
-        injector::MakeNOP(0x9BBE0D, 6, true);
-        injector::MakeCALL(0x9BBE0D, WindowedModeWrapper::CreateWindowExA_Hook, true);
-        injector::MakeNOP(0x9BC1F5, 6, true);
-        injector::MakeCALL(0x9BC1F5, WindowedModeWrapper::CreateWindowExW_Hook, true);
-        injector::MakeNOP(0x9BC377, 6, true);
-        injector::MakeCALL(0x9BC377, WindowedModeWrapper::CreateWindowExW_Hook, true);
-        injector::MakeNOP(0xB71198, 6, true);
-        injector::MakeCALL(0xB71198, WindowedModeWrapper::SetWindowLongA_Hook, true);
-        injector::MakeNOP(0xB7118C, 6, true);
-        injector::MakeCALL(0xB7118C, WindowedModeWrapper::AdjustWindowRect_Hook, true);
-        injector::MakeNOP(0xB711BF, 6, true);
-        injector::MakeCALL(0xB711BF, WindowedModeWrapper::SetWindowPos_Hook, true);
+        std::thread([]()
+        {
+            while (AppWindows.empty())
+            {
+                EnumWindows(EnumWindowsProc, GetCurrentProcessId());
+                std::this_thread::yield();
+            }
+            WindowedModeWrapper::GameHWND = AppWindows.back();
+            WindowedModeWrapper::SetWindowLongA_Hook(WindowedModeWrapper::GameHWND, 0, GetWindowLong(WindowedModeWrapper::GameHWND, GWL_STYLE));
+        }).detach();
+        
+        IATHook::Replace(GetModuleHandleA(NULL), "USER32.DLL",
+            std::forward_as_tuple("CreateWindowExA", WindowedModeWrapper::CreateWindowExA_Hook),
+            std::forward_as_tuple("CreateWindowExW", WindowedModeWrapper::CreateWindowExW_Hook),
+            std::forward_as_tuple("SetWindowLongA", WindowedModeWrapper::SetWindowLongA_Hook),
+            std::forward_as_tuple("SetWindowLongW", WindowedModeWrapper::SetWindowLongW_Hook),
+            std::forward_as_tuple("AdjustWindowRect", WindowedModeWrapper::AdjustWindowRect_Hook),
+            std::forward_as_tuple("SetWindowPos", WindowedModeWrapper::SetWindowPos_Hook)
+        );
     }
 
     {
-        injector::WriteMemory(0x0107FF78, 1000, true); //max fps
+        injector::WriteMemory(addrTbl[0x0107FF78], 1000, true); //max fps
+    }
+
+    if (bDisableCreateQuery)
+    {
+        auto pattern = hook::pattern("51 8B 81 ? ? ? ? 56 8B 35 ? ? ? ? 68 ? ? ? ? 8D 54 24 08");
+        injector::MakeJMP(pattern.get_first(), gpuCommandBufferSync, true);
+    }
+
+    {
+        static auto sPlayerPtr = *hook::get_pattern<void*>("8B 0D ? ? ? ? 85 C9 75 14 68 ? ? ? ? 6A 3E 68 ? ? ? ? E8 ? ? ? ? 83 C4 0C 8B 0D ? ? ? ? 8D 54 24 0A", 2);
+        static auto dword_116F398 = *hook::get_pattern<void*>("A1 ? ? ? ? 81 C6", 1);
+
+        LEDEffects::Inject([]()
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            
+            if (sPlayerPtr)
+            {
+                static auto sub_40EEE0 = [](int* _this) -> void*
+                {
+                    auto sub_87F4E0 = [](uint32_t* _this) -> int
+                    {
+                        if ((_this[61] - 1) > 1)
+                            return 0;
+                        else
+                            return _this[62];
+                    };
+            
+                    if (!_this)
+                        return nullptr;
+            
+                    uint32_t* v3; // esi
+                    auto v2 = _this[12];
+                    if (v2 == _this[13])
+                        return 0;
+                    while (true)
+                    {
+                        v3 = *(uint32_t**)(v2 + 16);
+                        if (sub_87F4E0((uint32_t*)dword_116F398) == v3[907])
+                        {
+                            auto v5 = v3[3] & 7;
+                            if (v5 == 2 || v5 == 1)
+                                break;
+                        }
+                        v2 = *(uint32_t*)(v2 + 8);
+                        if (v2 == _this[13])
+                            return 0;
+                    }
+                    return v3;
+            
+                };
+                auto pPlayerPtr = sub_40EEE0(*(int**)sPlayerPtr);
+            
+                if (pPlayerPtr)
+                {
+                    auto PlayerHealth = PtrWalkthrough<float>(&pPlayerPtr, 0xE38);
+            
+                    if (PlayerHealth)
+                    {
+                        auto Health = *PlayerHealth;
+                        if (Health > 0)
+                        {
+                            if (Health <= 400) {
+                                LEDEffects::SetLighting(26, 4, 4, true); //red
+                                LEDEffects::DrawCardiogram(100, 0, 0, 0, 0, 0); //red
+                            }
+                            else if (Health <= 600) {
+                                LEDEffects::SetLighting(50, 30, 4, true); //orange
+                                LEDEffects::DrawCardiogram(67, 0, 0, 0, 0, 0); //orange
+                            }
+                            else {
+                                LEDEffects::SetLighting(10, 30, 4, true);  //green
+                                LEDEffects::DrawCardiogram(0, 100, 0, 0, 0, 0); //green
+                            }
+                        }
+                        else
+                        {
+                            LEDEffects::SetLighting(26, 4, 4, false, true); //red
+                            LEDEffects::DrawCardiogram(100, 0, 0, 0, 0, 0, true);
+                        }
+                    }
+                    else
+                    {
+                        LogiLedStopEffects();
+                        LEDEffects::SetLighting(76, 12, 18); //logo red
+                    }
+                }
+                else
+                {
+                    LogiLedStopEffects();
+                    LEDEffects::SetLighting(90, 36, 3);
+                }
+            }
+        });
     }
 }
 
@@ -522,7 +860,65 @@ CEXP void InitializeASI()
 {
     std::call_once(CallbackHandler::flag, []()
     {
-        CallbackHandler::RegisterCallback(Init, hook::pattern("8B 4E 68 85 C9 75 47"));
+        //Enigma Protector bypass
+        //std::thread([]()
+        //{
+        //    auto ntdllModule = GetModuleHandleW(L"ntdll.dll");
+        //    if (ntdllModule)
+        //    {
+        //        auto proc = (uint8_t*)GetProcAddress(ntdllModule, "NtProtectVirtualMemory");
+        //        if (proc)
+        //        {
+        //            auto since = [](auto& start) -> auto { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start); };
+        //            auto start = std::chrono::steady_clock::now();
+        //            auto bRestoreNTDLL = true;
+        //            while (proc[0] != 0xE9)
+        //            {
+        //                std::this_thread::yield();
+        //                if (since(start).count() > 4000) {
+        //                    bRestoreNTDLL = false;
+        //                    break;
+        //                }
+        //            }
+        //
+        //            if (bRestoreNTDLL)
+        //            {
+        //                HANDLE process = GetCurrentProcess();
+        //                MODULEINFO mi = {};
+        //                GetModuleInformation(process, ntdllModule, &mi, sizeof(mi));
+        //                LPVOID ntdllBase = (LPVOID)mi.lpBaseOfDll;
+        //                auto szSystemPath = GetKnownFolderPath(FOLDERID_System, 0, nullptr) / L"ntdll.dll";
+        //                HANDLE ntdllFile = CreateFileW(szSystemPath.wstring().c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        //                HANDLE ntdllMapping = CreateFileMappingW(ntdllFile, NULL, PAGE_READONLY | SEC_IMAGE, 0, 0, NULL);
+        //                if (ntdllMapping)
+        //                {
+        //                    LPVOID ntdllMappingAddress = MapViewOfFile(ntdllMapping, FILE_MAP_READ, 0, 0, 0);
+        //                    PIMAGE_DOS_HEADER hookedDosHeader = (PIMAGE_DOS_HEADER)ntdllBase;
+        //                    PIMAGE_NT_HEADERS hookedNtHeader = (PIMAGE_NT_HEADERS)((DWORD_PTR)ntdllBase + hookedDosHeader->e_lfanew);
+        //
+        //                    for (WORD i = 0; i < hookedNtHeader->FileHeader.NumberOfSections; i++)
+        //                    {
+        //                        PIMAGE_SECTION_HEADER hookedSectionHeader = (PIMAGE_SECTION_HEADER)((DWORD_PTR)IMAGE_FIRST_SECTION(hookedNtHeader) + ((DWORD_PTR)IMAGE_SIZEOF_SECTION_HEADER * i));
+        //
+        //                        if (!strcmp((char*)hookedSectionHeader->Name, ".text"))
+        //                        {
+        //                            DWORD oldProtection = 0;
+        //                            auto isProtected = VirtualProtect((LPVOID)((DWORD_PTR)ntdllBase + (DWORD_PTR)hookedSectionHeader->VirtualAddress), hookedSectionHeader->Misc.VirtualSize, PAGE_EXECUTE_READWRITE, &oldProtection);
+        //                            memcpy((LPVOID)((DWORD_PTR)ntdllBase + (DWORD_PTR)hookedSectionHeader->VirtualAddress), (LPVOID)((DWORD_PTR)ntdllMappingAddress + (DWORD_PTR)hookedSectionHeader->VirtualAddress), hookedSectionHeader->Misc.VirtualSize);
+        //                            isProtected = VirtualProtect((LPVOID)((DWORD_PTR)ntdllBase + (DWORD_PTR)hookedSectionHeader->VirtualAddress), hookedSectionHeader->Misc.VirtualSize, oldProtection, &oldProtection);
+        //                        }
+        //                    }
+        //
+        //                    CloseHandle(process);
+        //                    CloseHandle(ntdllFile);
+        //                    CloseHandle(ntdllMapping);
+        //                }
+        //                FreeLibrary(ntdllModule);
+        //            }
+        //        }
+        //    }
+        //}).detach();
+        CallbackHandler::RegisterCallbackAtGetSystemTimeAsFileTime(Init, hook::pattern("8B 4E 68 85 C9 75 47"));
     });
 }
 
@@ -532,64 +928,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
     {
         if (!IsUALPresent()) { InitializeASI(); }
     }
+    else if (reason == DLL_PROCESS_DETACH)
+    {
+
+    }
     return TRUE;
-}
-
-uint32_t crc32_tab[] = {
-  0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f,
-  0xe963a535, 0x9e6495a3, 0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988,
-  0x09b64c2b, 0x7eb17cbd, 0xe7b82d07, 0x90bf1d91, 0x1db71064, 0x6ab020f2,
-  0xf3b97148, 0x84be41de, 0x1adad47d, 0x6ddde4eb, 0xf4d4b551, 0x83d385c7,
-  0x136c9856, 0x646ba8c0, 0xfd62f97a, 0x8a65c9ec, 0x14015c4f, 0x63066cd9,
-  0xfa0f3d63, 0x8d080df5, 0x3b6e20c8, 0x4c69105e, 0xd56041e4, 0xa2677172,
-  0x3c03e4d1, 0x4b04d447, 0xd20d85fd, 0xa50ab56b, 0x35b5a8fa, 0x42b2986c,
-  0xdbbbc9d6, 0xacbcf940, 0x32d86ce3, 0x45df5c75, 0xdcd60dcf, 0xabd13d59,
-  0x26d930ac, 0x51de003a, 0xc8d75180, 0xbfd06116, 0x21b4f4b5, 0x56b3c423,
-  0xcfba9599, 0xb8bda50f, 0x2802b89e, 0x5f058808, 0xc60cd9b2, 0xb10be924,
-  0x2f6f7c87, 0x58684c11, 0xc1611dab, 0xb6662d3d, 0x76dc4190, 0x01db7106,
-  0x98d220bc, 0xefd5102a, 0x71b18589, 0x06b6b51f, 0x9fbfe4a5, 0xe8b8d433,
-  0x7807c9a2, 0x0f00f934, 0x9609a88e, 0xe10e9818, 0x7f6a0dbb, 0x086d3d2d,
-  0x91646c97, 0xe6635c01, 0x6b6b51f4, 0x1c6c6162, 0x856530d8, 0xf262004e,
-  0x6c0695ed, 0x1b01a57b, 0x8208f4c1, 0xf50fc457, 0x65b0d9c6, 0x12b7e950,
-  0x8bbeb8ea, 0xfcb9887c, 0x62dd1ddf, 0x15da2d49, 0x8cd37cf3, 0xfbd44c65,
-  0x4db26158, 0x3ab551ce, 0xa3bc0074, 0xd4bb30e2, 0x4adfa541, 0x3dd895d7,
-  0xa4d1c46d, 0xd3d6f4fb, 0x4369e96a, 0x346ed9fc, 0xad678846, 0xda60b8d0,
-  0x44042d73, 0x33031de5, 0xaa0a4c5f, 0xdd0d7cc9, 0x5005713c, 0x270241aa,
-  0xbe0b1010, 0xc90c2086, 0x5768b525, 0x206f85b3, 0xb966d409, 0xce61e49f,
-  0x5edef90e, 0x29d9c998, 0xb0d09822, 0xc7d7a8b4, 0x59b33d17, 0x2eb40d81,
-  0xb7bd5c3b, 0xc0ba6cad, 0xedb88320, 0x9abfb3b6, 0x03b6e20c, 0x74b1d29a,
-  0xead54739, 0x9dd277af, 0x04db2615, 0x73dc1683, 0xe3630b12, 0x94643b84,
-  0x0d6d6a3e, 0x7a6a5aa8, 0xe40ecf0b, 0x9309ff9d, 0x0a00ae27, 0x7d079eb1,
-  0xf00f9344, 0x8708a3d2, 0x1e01f268, 0x6906c2fe, 0xf762575d, 0x806567cb,
-  0x196c3671, 0x6e6b06e7, 0xfed41b76, 0x89d32be0, 0x10da7a5a, 0x67dd4acc,
-  0xf9b9df6f, 0x8ebeeff9, 0x17b7be43, 0x60b08ed5, 0xd6d6a3e8, 0xa1d1937e,
-  0x38d8c2c4, 0x4fdff252, 0xd1bb67f1, 0xa6bc5767, 0x3fb506dd, 0x48b2364b,
-  0xd80d2bda, 0xaf0a1b4c, 0x36034af6, 0x41047a60, 0xdf60efc3, 0xa867df55,
-  0x316e8eef, 0x4669be79, 0xcb61b38c, 0xbc66831a, 0x256fd2a0, 0x5268e236,
-  0xcc0c7795, 0xbb0b4703, 0x220216b9, 0x5505262f, 0xc5ba3bbe, 0xb2bd0b28,
-  0x2bb45a92, 0x5cb36a04, 0xc2d7ffa7, 0xb5d0cf31, 0x2cd99e8b, 0x5bdeae1d,
-  0x9b64c2b0, 0xec63f226, 0x756aa39c, 0x026d930a, 0x9c0906a9, 0xeb0e363f,
-  0x72076785, 0x05005713, 0x95bf4a82, 0xe2b87a14, 0x7bb12bae, 0x0cb61b38,
-  0x92d28e9b, 0xe5d5be0d, 0x7cdcefb7, 0x0bdbdf21, 0x86d3d2d4, 0xf1d4e242,
-  0x68ddb3f8, 0x1fda836e, 0x81be16cd, 0xf6b9265b, 0x6fb077e1, 0x18b74777,
-  0x88085ae6, 0xff0f6a70, 0x66063bca, 0x11010b5c, 0x8f659eff, 0xf862ae69,
-  0x616bffd3, 0x166ccf45, 0xa00ae278, 0xd70dd2ee, 0x4e048354, 0x3903b3c2,
-  0xa7672661, 0xd06016f7, 0x4969474d, 0x3e6e77db, 0xaed16a4a, 0xd9d65adc,
-  0x40df0b66, 0x37d83bf0, 0xa9bcae53, 0xdebb9ec5, 0x47b2cf7f, 0x30b5ffe9,
-  0xbdbdf21c, 0xcabac28a, 0x53b39330, 0x24b4a3a6, 0xbad03605, 0xcdd70693,
-  0x54de5729, 0x23d967bf, 0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94,
-  0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
-};
-
-uint32_t crc32(uint32_t crc, const void* buf, size_t size)
-{
-    const uint8_t* p;
-
-    p = (uint8_t*)buf;
-    crc = crc ^ ~0U;
-
-    while (size--)
-        crc = crc32_tab[(crc ^ *p++) & 0xFF] ^ (crc >> 8);
-
-    return crc ^ ~0U;
 }

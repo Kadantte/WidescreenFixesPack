@@ -312,11 +312,11 @@ void RsSelectDeviceHook()
 
 void FixCoronas()
 {
+    auto pattern = hook::pattern("D8 0E D9 1E D9 05 ? ? ? ? D8 35 ? ? ? ? D8 0B D9 1B"); //0x57797A
+    injector::WriteMemory<uint8_t>(pattern.count(1).get(0).get<uint32_t>(1), 0x0B, true);
+
     if (bNoLightSquare)
     {
-        auto pattern = hook::pattern("D8 0E D9 1E D9 05 ? ? ? ? D8 35 ? ? ? ? D8 0B D9 1B"); //0x57797A
-        injector::WriteMemory<uint8_t>(pattern.count(1).get(0).get<uint32_t>(1), 0x0B, true);
-
         auto pfCAutoPreRender = (uint32_t)hook::pattern("FF 35 ? ? ? ? 50 8D 84 24 24 05 00").count(1).get(0).get<uint32_t>(0);
         auto pfCBikePreRender = (uint32_t)hook::pattern("D9 83 FC 03 00 00 D8 1D ? ? ? ? DF E0 F6 C4 45").count(1).get(0).get<uint32_t>(0);
         auto pfCBrightLightsRegisterOne = (uint32_t)hook::pattern("D9 EE D9 EE 83 EC 20 8B 44 24").count(1).get(0).get<uint32_t>(0);
@@ -677,42 +677,17 @@ void ApplyIniOptions()
 
     if (bIVRadarScaling)
     {
-        fCustomRadarPosXIV = 40.0f + 31.0f;
-        auto pattern = hook::pattern("D8 05 ? ? ? ? DE C1 D9 5C 24 28");
-        injector::WriteMemory<float>(*pattern.count(1).get(0).get<uint32_t*>(2), fCustomRadarPosXIV, true); //0x68FD2C
-        static float f40 = 40.0f;
-        pattern = hook::pattern("83 EC 50 DD D9 D9 05 ? ? ? ? D8 C9");
-        injector::WriteMemory(pattern.count(1).get(0).get<uint32_t>(7), &f40, true); //0x4C2996
-        injector::WriteMemory(pattern.count(1).get(0).get<uint32_t>(60), &f40, true); //0x4C29CB
-
         fCustomRadarWidthIV = 94.0f - 5.5f;
         pattern = hook::pattern("D8 0D ? ? ? ? DD D9 D9 C2 D8 C9 D8 0D");
         injector::WriteMemory<float>(*pattern.count(1).get(0).get<uint32_t*>(2), fCustomRadarWidthIV, true); //0x68FD24
 
-        fCustomRadarPosYIV = 116.0f - 7.5f;
-        pattern = hook::pattern("D9 05 ? ? ? ? D8 CB DA 2C 24 DE C1");
-        injector::WriteMemory<float>(*pattern.count(1).get(0).get<uint32_t*>(2), fCustomRadarPosYIV, true); //0x68FD34
         fCustomRadarHeightIV = 76.0f + 5.0f;
         pattern = hook::pattern("D9 05 ? ? ? ? D8 C9 DD DB D9 C1 D8 CB");
         injector::WriteMemory<float>(*pattern.count(1).get(0).get<uint32_t*>(2), fCustomRadarHeightIV, true); //0x68FD30
 
-        fCustomRadarRingPosXIV = 34.0f + 31.0f;
-        fCustomRadarRingPosXIV2 = fCustomRadarRingPosXIV + 6.0f;
-        pattern = hook::pattern("C7 84 24 80 04 00 00 00 00 08 42");
-        injector::WriteMemory<float>(pattern.count(1).get(0).get<uint32_t>(7), fCustomRadarRingPosXIV, true); //0x55A956
-        pattern = hook::pattern("C7 84 24 A0 04 00 00 00 00 08 42");
-        injector::WriteMemory<float>(pattern.count(1).get(0).get<uint32_t>(7), fCustomRadarRingPosXIV, true); //0x55AA94
-        pattern = hook::pattern("D8 05 ? ? ? ? D8 05 ? ? ? ? D9 9C 24");
-        injector::WriteMemory(pattern.count(2).get(0).get<uint32_t>(2), &fCustomRadarRingPosXIV2, true); //0x55A9AC + 0x2
-        injector::WriteMemory(pattern.count(2).get(1).get<uint32_t>(2), &fCustomRadarRingPosXIV2, true); //0x55AAE5 + 0x2
-
         fCustomRadarRingWidthIV = 94.0f - 5.5f;
         pattern = hook::pattern("D8 0D ? ? ? ? D8 05 ? ? ? ? D8 05 ? ? ? ? D9 9C 24 98 04 00 00");
         injector::WriteMemory<float>(*pattern.count(1).get(0).get<uint32_t*>(2), fCustomRadarRingWidthIV, true); //0x697C1C
-
-        fCustomRadarRingPosYIV = 116.0f - 7.5f;
-        pattern = hook::pattern("D9 05 ? ? ? ? D8 CA DA 6C 24 74 51");
-        injector::WriteMemory<float>(*pattern.count(1).get(0).get<uint32_t*>(2), fCustomRadarRingPosYIV, true); //0x697C18
 
         fCustomRadarRingHeightIV = 76.0f + 5.0f;
         pattern = hook::pattern("D9 05 ? ? ? ? D8 CA D8 C1");
@@ -804,6 +779,27 @@ void Fix2DSprites()
     pRwRenderStateSet = hook::get_pattern("A1 ? ? ? ? 83 EC 08 83 38 00"); //0x649BA0
 }
 
+static float* pMenuPattern6;
+CEXP void UpdateVars()
+{
+    if (pMenuPattern6)
+    {
+        *pMenuPattern6 = fWideScreenWidthScaleDown;
+
+        fCrosshairPosFactor = ((0.52999997f - 0.5f) / ((*CDraw::pfScreenAspectRatio) / (16.0f / 9.0f))) + 0.5f;
+        fCrosshairHeightScaleDown = fWideScreenWidthScaleDown * *CDraw::pfScreenAspectRatio;
+
+        fWideScreenHeightScaleDown = 1.0f / 480.0f;
+        fCustomWideScreenWidthScaleDown = fWideScreenWidthScaleDown * fHudWidthScale;
+        fCustomWideScreenHeightScaleDown = fWideScreenHeightScaleDown * fHudHeightScale;
+
+        fCustomRadarWidthScale = fWideScreenWidthScaleDown * fRadarWidthScale;
+        fPlayerMarkerPos = 94.0f * fRadarWidthScale;
+        if (bIVRadarScaling)
+            fPlayerMarkerPos = (94.0f - 5.5f) * fRadarWidthScale;
+    }
+}
+
 void Init()
 {
     //Immediate changes
@@ -827,7 +823,6 @@ void Init()
     {
         void operator()(injector::reg_pack& regs)
         {
-            static float* pMenuPattern6;
             if (*dwGameLoadState < 9)
             {
                 SilentPatchCompatibility();
@@ -854,19 +849,7 @@ void Init()
                 wcscpy(ptr, L"BORDERS");
             }
 
-            *pMenuPattern6 = fWideScreenWidthScaleDown;
-
-            fCrosshairPosFactor = ((0.52999997f - 0.5f) / ((*CDraw::pfScreenAspectRatio) / (16.0f / 9.0f))) + 0.5f;
-            fCrosshairHeightScaleDown = fWideScreenWidthScaleDown * *CDraw::pfScreenAspectRatio;
-
-            fWideScreenHeightScaleDown = 1.0f / 480.0f;
-            fCustomWideScreenWidthScaleDown = fWideScreenWidthScaleDown * fHudWidthScale;
-            fCustomWideScreenHeightScaleDown = fWideScreenHeightScaleDown * fHudHeightScale;
-
-            fCustomRadarWidthScale = fWideScreenWidthScaleDown * fRadarWidthScale;
-            fPlayerMarkerPos = 94.0f * fRadarWidthScale;
-            if (bIVRadarScaling)
-                fPlayerMarkerPos = (94.0f - 5.5f) * fRadarWidthScale;
+            UpdateVars();
 
             *dwGameLoadState = 9;
         }
